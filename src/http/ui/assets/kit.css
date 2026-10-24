@@ -14,6 +14,9 @@
 	--line: #d9d6cd;
 	--panel: #fbfaf6;
 	--accent: var(--hue-light);
+	/* Расслоение на светлом фоне ложится умножением, на тёмном -- осветлением. */
+	--glitch-blend: multiply;
+	--glitch-opacity: 0.55;
 	--mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
 	--sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
@@ -26,6 +29,8 @@
 		--line: #26262c;
 		--panel: #131317;
 		--accent: var(--hue-dark);
+		--glitch-blend: screen;
+		--glitch-opacity: 0.8;
 	}
 }
 
@@ -36,6 +41,8 @@
 	--line: #26262c;
 	--panel: #131317;
 	--accent: var(--hue-dark);
+	--glitch-blend: screen;
+	--glitch-opacity: 0.8;
 }
 
 :root[data-theme='light'] {
@@ -162,8 +169,8 @@ h2 {
 	position: absolute;
 	inset: 0;
 	padding: inherit;
-	mix-blend-mode: screen;
-	opacity: 0.8;
+	mix-blend-mode: var(--glitch-blend);
+	opacity: var(--glitch-opacity);
 	animation: glitch 6s steps(1) infinite;
 }
 .glitch::before {
@@ -175,13 +182,6 @@ h2 {
 	color: var(--cyan);
 	transform: translateX(2px);
 	clip-path: inset(55% 0 0 0);
-}
-@media (prefers-color-scheme: light) {
-	.glitch::before,
-	.glitch::after {
-		mix-blend-mode: multiply;
-		opacity: 0.55;
-	}
 }
 @keyframes glitch {
 	0%,
@@ -568,4 +568,73 @@ input:focus {
 .dot--error {
 	background: var(--red);
 	box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+/* Отклик на наведение и фокус с клавиатуры. */
+a:hover {
+	color: var(--accent);
+}
+.btn {
+	transition:
+		background-color 0.15s,
+		border-color 0.15s,
+		box-shadow 0.15s,
+		transform 0.1s;
+}
+.btn:active {
+	transform: translateY(1px);
+}
+.btn--ghost:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+.btn--primary:hover {
+	box-shadow:
+		-3px 0 0 var(--red),
+		3px 0 0 var(--cyan);
+}
+.btn--tg:hover {
+	background: #1e96d4;
+}
+.btn--danger:hover {
+	background: color-mix(in srgb, var(--red) 10%, transparent);
+}
+.theme:hover {
+	border-color: var(--accent);
+}
+:is(a, button, summary):focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* Виджет Telegram рисует свой iframe сразу за скриптом, держим его по центру карточки. */
+.auth iframe {
+	display: block;
+	margin: 0 auto;
+}
+
+.dot--busy {
+	animation: busy 1.2s ease-in-out infinite alternate;
+}
+@keyframes busy {
+	to {
+		box-shadow: 0 0 0 9px color-mix(in srgb, #f2b33d 0%, transparent);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.glitch::before,
+	.glitch::after,
+	.wire,
+	.dot--busy {
+		animation: none;
+	}
+	.btn {
+		transition: none;
+	}
+}
+
+/* Отступ снизу у карточки задаёт сама карточка, а не её последний ребёнок. */
+.panel > :last-child {
+	margin-bottom: 0;
 }

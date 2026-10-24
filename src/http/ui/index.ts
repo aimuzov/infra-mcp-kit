@@ -155,8 +155,7 @@ export function landingPage({ service, tagline, lead, mcpUrl, tools = [], aside 
 		main: html`<section class="hero">
 				<p class="eyebrow">MCP-коннектор</p>
 				<h1 class="glitch" data-text="${service.name}">${service.name}</h1>
-				<p class="tagline">${tagline}</p>
-				${lead && html`<p class="lead">${lead}</p>`}
+				${tagline && html`<p class="tagline">${tagline}</p>`} ${lead && html`<p class="lead">${lead}</p>`}
 			</section>
 			<section class="panel connect">
 				<h2>Подключить</h2>
@@ -193,9 +192,12 @@ export function landingPage({ service, tagline, lead, mcpUrl, tools = [], aside 
 
 const HINT = 'Если ты не начинал подключение сам, просто закрой страницу.'
 
-function handshake(): SafeHtml {
-	return html`<div class="handshake">
-		<span class="party party--client">C</span>
+/** Клиент и сервис, связанные пунктиром. Значка у клиента нет, вместо него первая буква имени. */
+function handshake(client: Client): SafeHtml {
+	const initial = (client.name || client.host).trim().charAt(0).toUpperCase() || '?'
+
+	return html`<div class="handshake" aria-hidden="true">
+		<span class="party party--client">${initial}</span>
 		<span class="wire" aria-hidden="true"></span>
 		<span class="party party--service">${mark('party__mark')}</span>
 	</div>`
@@ -226,7 +228,7 @@ export function consentPage({ service, client, title, grants = [], action, error
 		title: `Вход в ${service.name}`,
 		screen: 'consent',
 		main: html`<section class="panel auth">
-			${handshake()}
+			${handshake(client)}
 			<h1>${heading}</h1>
 			<p class="muted">${clientLine(client)}</p>
 			${error && html`<p class="alert" role="alert">${error}</p>`}
@@ -289,7 +291,7 @@ export function tokenFormPage(options: TokenFormOptions): string {
 		title,
 		screen: 'token',
 		main: html`<section class="panel auth">
-			${handshake()}
+			${handshake(client)}
 			<h1>${title}</h1>
 			<p class="muted">${lead ?? clientLine(client)}</p>
 			${error && html`<p class="alert" role="alert">${error}</p>`}

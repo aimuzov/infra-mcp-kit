@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.0...v1.0.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* build the kit on prepare so git installs get build/ ([38bb83d](https://github.com/aimuzov/infra-mcp-kit/commit/38bb83d488e2576efc456a77e03d2a999e4f8583))
+* build the kit on prepare so git installs get build/ ([3a47206](https://github.com/aimuzov/infra-mcp-kit/commit/3a47206b3bf097e3acfecb728d70ae776f01a518))
+
 ## 1.0.0 (2026-10-24)
 
 

@@ -1,0 +1,48 @@
+name: MCP server check
+description: Install dependencies, then run the formatter, linter, type check, tests and build of an MCP server, start the built server once and dry-run its npm package.
+
+inputs:
+  apt-packages:
+    description: Space-separated Ubuntu packages the tests or the build need, e.g. ffmpeg.
+    required: false
+    default: ''
+  smoke:
+    description: Command that starts the built server and exits, proving the package runs without dev dependencies. Empty skips it.
+    required: false
+    default: node build/index.js --help
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-node@v5
+      with:
+        node-version-file: package.json
+        cache: npm
+    # NOTE: `$PACKAGES` без кавычек намеренно, список через пробел
+    # должен разбиться на отдельные аргументы.
+    - if: inputs.apt-packages != ''
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.apt-packages }}
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $PACKAGES
+    - shell: bash
+      run: npm ci
+    - shell: bash
+      run: npm run format:check
+    - shell: bash
+      run: npm run lint
+    - shell: bash
+      run: npm run typecheck
+    - shell: bash
+      run: npm test
+    - shell: bash
+      run: npm run build
+    - if: inputs.smoke != ''
+      shell: bash
+      env:
+        SMOKE: ${{ inputs.smoke }}
+      run: eval "$SMOKE"
+    # Пакет уходит в npm, поэтому смотрим, что в него попадёт, ещё до релиза.
+    - shell: bash
+      run: npm pack --dry-run

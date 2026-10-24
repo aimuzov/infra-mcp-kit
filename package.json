@@ -1,0 +1,81 @@
+{
+	"name": "@aimuzov/infra-mcp-kit",
+	"version": "0.0.0",
+	"description": "Shared core, hosted OAuth connector, UI pages and test helpers for the aimuzov MCP servers",
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"mcp-server",
+		"oauth",
+		"claude"
+	],
+	"homepage": "https://github.com/aimuzov/infra-mcp-kit#readme",
+	"bugs": {
+		"url": "https://github.com/aimuzov/infra-mcp-kit/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/aimuzov/infra-mcp-kit.git"
+	},
+	"license": "MIT",
+	"author": "Aleksey Imuzov",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./build/index.d.ts",
+			"default": "./build/index.js"
+		},
+		"./http": {
+			"types": "./build/http/index.d.ts",
+			"default": "./build/http/index.js"
+		},
+		"./testing": {
+			"types": "./build/testing/index.d.ts",
+			"default": "./build/testing/index.js"
+		}
+	},
+	"files": [
+		"build"
+	],
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"engines": {
+		"node": ">=26"
+	},
+	"scripts": {
+		"build": "rm -rf build && tsc -p tsconfig.build.json && cp -R src/http/ui/assets build/http/ui/",
+		"typecheck": "tsc",
+		"test": "node --conditions=development --test 'src/**/*.test.ts'",
+		"format": "oxlint --fix && prettier --write .",
+		"format:check": "prettier --check .",
+		"lint": "oxlint --deny-warnings",
+		"prepack": "npm run build",
+		"test:ui": "node --conditions=development --test src/http/ui/screens.e2e.ts"
+	},
+	"dependencies": {
+		"@types/express": "5.0.6",
+		"express": "5.2.1",
+		"jose": "6.2.8"
+	},
+	"peerDependencies": {
+		"@modelcontextprotocol/sdk": "^1.32.0"
+	},
+	"devDependencies": {
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.0.0",
+		"@modelcontextprotocol/sdk": "1.32.1",
+		"@types/node": "26.6.5",
+		"oxlint": "1.87.0",
+		"playwright": "1.64.0",
+		"prettier": "3.9.9",
+		"typescript": "6.0.3"
+	},
+	"imports": {
+		"#kit/*": {
+			"development": "./src/*.ts",
+			"types": "./build/*.d.ts",
+			"default": "./build/*.js"
+		}
+	}
+}

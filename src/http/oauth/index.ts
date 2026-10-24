@@ -1,0 +1,105 @@
+import { redirectUriMatches } from '@modelcontextprotocol/sdk/server/auth/handlers/authorize.js'
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js'
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js'
+import express, { type Express, type RequestHandler } from 'express'
+
+import { failPage } from '#kit/http/ui/index'
+import { log } from '#kit/log'
+import { messageOf } from '#kit/results'
+
+import { CALLBACK_PATH, KitOAuthProvider, LoginError, type ProviderOptions } from './provider.ts'
+
+export type OAuthOptions = ProviderOptions & { mcpUrl: URL }
+
+export type MountedOAuth = {
+	provider: KitOAuthProvider
+	/** Проверка Bearer-токена для `/mcp`; без токена клиент получит 401 с адресом метаданных. */
+	bearer: RequestHandler
+}
+
+/**
+ * Подключить OAuth к приложению: роутер SDK (`/.well-known/*`, `/register`, `/authorize`,
+ * `/token`) и колбэк, на который вход возвращает человека.
+ */
+export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
+	const provider = new KitOAuthProvider(options)
+	const { service, tokens, store, login, publicUrl, mcpUrl } = options
+
+	app.use(
+		mcpAuthRouter({
+			provider,
+			issuerUrl: publicUrl,
+			resourceServerUrl: mcpUrl,
+			resourceName: service.name,
+		}),
+	)
+
+	const fail = (res: express.Response, title: string, message?: string) =>
+		res
+			.status(400)
+			.type('html')
+			.send(failPage({ service, title, message, code: 'invalid_request' }))
+
+	// GET для виджетов, которые возвращают человека ссылкой, POST для форм.
+	app.all(CALLBACK_PATH, express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+		res.set('Cache-Control', 'no-store')
+
+		if (req.method !== 'GET' && req.method !== 'POST') return void res.status(405).set('Allow', 'GET, POST').end()
+
+		const raw = String(req.query.request ?? req.body?.request ?? '')
+		const request = raw && (await tokens.verify('authorize', raw))
+
+		if (!request) {
+			return void fail(res, 'Ссылка для входа устарела', 'Начни подключение заново из клиента.')
+		}
+
+		const client = store.getClient(request.sub)
+		const redirectUri = String(request.redirect_uri)
+
+		if (!client || !client.redirect_uris.some((uri) => redirectUriMatches(redirectUri, uri))) {
+			return void fail(res, 'Клиент не зарегистрирован', 'Начни подключение заново из клиента.')
+		}
+
+		try {
+			const grant = await login.complete(req)
+			const target = await provider.issueCode(
+				client.client_id,
+				redirectUri,
+				String(request.code_challenge),
+				String(request.state ?? ''),
+				grant,
+			)
+
+			res.redirect(302, target.href)
+		} catch (error) {
+			if (!(error instanceof LoginError)) {
+				log.error('login failed', { message: messageOf(error) })
+
+				return void fail(res, 'Не получилось войти', 'Попробуй ещё раз чуть позже.')
+			}
+
+			res.status(400)
+				.type('html')
+				.send(await provider.renderLogin(raw, client, redirectUri, req, error.message))
+		}
+	})
+
+	return {
+		provider,
+		bearer: requireBearerAuth({
+			verifier: provider,
+			resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpUrl),
+		}),
+	}
+}
+
+export {
+	CALLBACK_PATH,
+	KitOAuthProvider,
+	LoginError,
+	type Grant,
+	type Login,
+	type LoginPageContext,
+} from './provider.ts'
+export { CODE_TTL_MS, memoryStore, sqliteStore, type AuthStore, type PendingCode } from './store.ts'
+export { ownClaims, Tokens, TTL, type TokenClaims, type TokenKind, type TokensOptions } from './tokens.ts'

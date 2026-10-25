@@ -17,19 +17,38 @@ export function required(env: Env, name: string): string {
 	return value
 }
 
-/** Целое число; мусор, ноль и отрицательные дают `fallback`. */
-export function int(env: Env, name: string, fallback: number): number {
-	const value = Number.parseInt(str(env, name), 10)
+/**
+ * Целое число не меньше `min` (по умолчанию 1). Пустая переменная даёт `fallback`,
+ * а мусор -- ошибку: опечатка в `PORT` не должна тихо превращаться в порт по умолчанию.
+ */
+export function int(env: Env, name: string, fallback: number, { min = 1 }: { min?: number } = {}): number {
+	const raw = str(env, name)
 
-	return value > 0 ? value : fallback
+	if (!raw) return fallback
+
+	const value = Number(raw)
+
+	if (!Number.isInteger(value) || value < min) {
+		throw new Error(`${name}: нужно целое число от ${min}, а задано "${raw}"`)
+	}
+
+	return value
 }
 
+const TRUE = ['1', 'true', 'yes', 'on']
+const FALSE = ['0', 'false', 'no', 'off']
+
 export function bool(env: Env, name: string, fallback = false): boolean {
-	const value = str(env, name).toLowerCase()
+	const raw = str(env, name)
+	const value = raw.toLowerCase()
 
 	if (!value) return fallback
 
-	return ['1', 'true', 'yes', 'on'].includes(value)
+	if (TRUE.includes(value)) return true
+
+	if (FALSE.includes(value)) return false
+
+	throw new Error(`${name}: нужно ${TRUE.join('/')} или ${FALSE.join('/')}, а задано "${raw}"`)
 }
 
 /** Список через запятую. */
@@ -40,15 +59,25 @@ export function list(env: Env, name: string): string[] {
 		.filter(Boolean)
 }
 
+export type DataDirOptions = {
+	/** Своя переменная вместо `<NAME>_DATA_DIR`, например уже описанная в README сервера. */
+	variable?: string
+	/** `false` -- только вычислить путь: чистому `loadConfig` не место для записи на диск. */
+	create?: boolean
+}
+
 /**
  * Каталог данных сервера: `<NAME>_DATA_DIR`, иначе `$XDG_CONFIG_HOME/<name>`
- * или `~/.config/<name>`. Создаётся, если его нет.
+ * или `~/.config/<name>`. По умолчанию создаётся, если его нет.
  */
-export function dataDir(name: string, env: Env = process.env): string {
-	const own = str(env, `${name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_DATA_DIR`)
-	const dir = own || join(str(env, 'XDG_CONFIG_HOME', join(homedir(), '.config')), name)
+export function dataDir(
+	name: string,
+	env: Env = process.env,
+	{ variable = `${name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_DATA_DIR`, create = true }: DataDirOptions = {},
+): string {
+	const dir = str(env, variable) || join(str(env, 'XDG_CONFIG_HOME', join(homedir(), '.config')), name)
 
-	mkdirSync(dir, { recursive: true })
+	if (create) mkdirSync(dir, { recursive: true })
 
 	return dir
 }

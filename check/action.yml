@@ -1,5 +1,5 @@
 name: MCP server check
-description: Install dependencies, then run the formatter, linter, type check, tests and build of an MCP server, start the built server once and dry-run its npm package.
+description: Install dependencies, then run the formatter, linter, type check, tests and build of an MCP server, install its packed tarball the way npx does and start it, and optionally build its Docker image.
 
 inputs:
   apt-packages:
@@ -7,9 +7,17 @@ inputs:
     required: false
     default: ''
   smoke:
-    description: Command that starts the built server and exits, proving the package runs without dev dependencies. Empty skips it.
+    description: Command that starts the built server from the repository and exits. Empty skips it.
     required: false
     default: node build/index.js --help
+  installed-smoke:
+    description: Command run in an empty directory where the packed tarball is installed without dev dependencies, as npx would. `auto` runs the first bin with --help. Empty skips the install.
+    required: false
+    default: auto
+  docker:
+    description: Dockerfile to build, e.g. deploy/Dockerfile. The image then runs `node build/index.js --help`. Empty skips it.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -43,6 +51,32 @@ runs:
       env:
         SMOKE: ${{ inputs.smoke }}
       run: eval "$SMOKE"
-    # Пакет уходит в npm, поэтому смотрим, что в него попадёт, ещё до релиза.
-    - shell: bash
+    # Пакет уходит в npm, а в репозитории рядом лежат devDependencies и build/:
+    # смотрим на то, что получит человек, ставя тарбол в пустой каталог без них.
+    - if: inputs.installed-smoke != ''
+      shell: bash
+      env:
+        SMOKE: ${{ inputs.installed-smoke }}
+      run: |
+        tarball="$(npm pack --silent --pack-destination "$RUNNER_TEMP" | tail -n 1)"
+        bin="$(node -p "Object.keys(require('./package.json').bin ?? {})[0] ?? ''")"
+        dir="$RUNNER_TEMP/installed"
+        mkdir -p "$dir"
+        cd "$dir"
+        npm init -y > /dev/null
+        npm install --omit=dev --no-audit --no-fund "$RUNNER_TEMP/$tarball"
+        if [[ "$SMOKE" == auto ]]; then
+          if [[ -z "$bin" ]]; then echo "no bin in package.json, set installed-smoke"; exit 1; fi
+          SMOKE="npx --no-install $bin --help"
+        fi
+        eval "$SMOKE"
+    - if: inputs.installed-smoke == ''
+      shell: bash
       run: npm pack --dry-run
+    - if: inputs.docker != ''
+      shell: bash
+      env:
+        DOCKERFILE: ${{ inputs.docker }}
+      run: |
+        docker build -f "$DOCKERFILE" -t mcp-check .
+        docker run --rm mcp-check node build/index.js --help

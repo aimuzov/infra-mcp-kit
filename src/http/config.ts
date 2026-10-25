@@ -1,5 +1,7 @@
 import { int, list, required, str, type Env } from '#kit/env'
 
+import { MIN_SECRET_LENGTH } from './oauth/tokens.ts'
+
 /** Что нужно любому удалённому коннектору поверх своих настроек. */
 export type HttpConfig = {
 	port: number
@@ -11,7 +13,7 @@ export type HttpConfig = {
 	allowedRedirectUris: string[]
 }
 
-export const MIN_SECRET_LENGTH = 32
+export { MIN_SECRET_LENGTH }
 
 /** Колбэки Claude; loopback для Claude Code разрешён сверх них. */
 export const CLAUDE_CALLBACKS = ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback']
@@ -26,10 +28,30 @@ export function loadHttpConfig(env: Env = process.env): HttpConfig {
 
 	return {
 		port: int(env, 'PORT', 8080),
-		publicUrl: new URL(required(env, 'PUBLIC_URL')),
+		publicUrl: publicUrl(required(env, 'PUBLIC_URL')),
 		authSecret,
 		allowedRedirectUris: list(env, 'ALLOWED_REDIRECT_URIS'),
 	}
+}
+
+/**
+ * Только origin: `/mcp`, колбэки и метаданные строятся от корня, и путь
+ * в `PUBLIC_URL` молча потерялся бы.
+ */
+function publicUrl(raw: string): URL {
+	if (!URL.canParse(raw)) throw new Error(`PUBLIC_URL: не адрес: "${raw}"`)
+
+	const url = new URL(raw)
+
+	if (url.pathname !== '/' || url.search || url.hash) {
+		throw new Error(`PUBLIC_URL: нужен адрес без пути, например ${url.origin}`)
+	}
+
+	if (url.protocol !== 'https:' && !isLoopback(url)) {
+		throw new Error(`PUBLIC_URL: нужен https, http только на localhost`)
+	}
+
+	return url
 }
 
 /** Режим разработки по `PUBLIC_URL` на localhost. Нужен для входов, которые работают только на своём домене. */

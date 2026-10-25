@@ -21,6 +21,7 @@ export type TokenFormLoginOptions = {
  */
 export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 	return {
+		sealsSecrets: true,
 		render: ({ service, client, callbackUrl, request, error }) => {
 			const action = new URL(callbackUrl)
 

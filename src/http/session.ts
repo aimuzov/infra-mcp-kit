@@ -7,7 +7,14 @@ export function readCookie(req: Request, name: string): string | undefined {
 	for (const part of (req.get('cookie') ?? '').split(';')) {
 		const [key, ...rest] = part.trim().split('=')
 
-		if (key === name) return decodeURIComponent(rest.join('='))
+		if (key !== name) continue
+
+		// Битую cookie может подбросить кто угодно с соседнего поддомена; это не повод для 500.
+		try {
+			return decodeURIComponent(rest.join('='))
+		} catch {
+			return undefined
+		}
 	}
 
 	return undefined

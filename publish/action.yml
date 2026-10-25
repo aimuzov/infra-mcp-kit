@@ -23,8 +23,12 @@ runs:
         registry-url: https://registry.npmjs.org
     - shell: bash
       run: npm ci
-    # `prepack` собирает пакет, provenance связывает его с этим прогоном и коммитом.
+    # Сборку делает `prepack` или `prepare` пакета, provenance связывает его
+    # с этим прогоном и коммитом. Пустой NODE_AUTH_TOKEN не задаём вовсе:
+    # с ним npm пошёл бы с пустым токеном вместо trusted publishing.
     - shell: bash
       env:
-        NODE_AUTH_TOKEN: ${{ inputs.npm-token }}
-      run: npm publish --provenance --access public
+        TOKEN: ${{ inputs.npm-token }}
+      run: |
+        if [[ -n "$TOKEN" ]]; then export NODE_AUTH_TOKEN="$TOKEN"; fi
+        npm publish --provenance --access public

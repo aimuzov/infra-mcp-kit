@@ -47,12 +47,12 @@
 	"scripts": {
 		"build": "rm -rf build && tsc -p tsconfig.build.json && cp -R src/http/ui/assets build/http/ui/",
 		"typecheck": "tsc",
-		"test": "node --conditions=development --test 'src/**/*.test.ts'",
+		"test": "node --conditions=infra-mcp-kit-source --test 'src/**/*.test.ts'",
 		"format": "oxlint --fix && prettier --write .",
 		"format:check": "prettier --check .",
 		"lint": "oxlint --deny-warnings",
 		"prepare": "npm run build",
-		"test:ui": "node --conditions=development --test src/http/ui/screens.e2e.ts"
+		"test:ui": "node --conditions=infra-mcp-kit-source --test src/http/ui/screens.e2e.ts"
 	},
 	"dependencies": {
 		"@types/express": "5.0.6",
@@ -73,7 +73,7 @@
 	},
 	"imports": {
 		"#kit/*": {
-			"development": "./src/*.ts",
+			"infra-mcp-kit-source": "./src/*.ts",
 			"types": "./build/*.d.ts",
 			"default": "./build/*.js"
 		}

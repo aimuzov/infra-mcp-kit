@@ -4,12 +4,12 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelconte
 import express, { type Express, type RequestHandler } from 'express'
 
 import { failPage } from '#kit/http/ui/index'
-import { log } from '#kit/log'
+import { log, type Logger } from '#kit/log'
 import { messageOf } from '#kit/results'
 
 import { CALLBACK_PATH, KitOAuthProvider, LoginError, type ProviderOptions } from './provider.ts'
 
-export type OAuthOptions = ProviderOptions & { mcpUrl: URL }
+export type OAuthOptions = ProviderOptions & { mcpUrl: URL; logger?: Logger }
 
 export type MountedOAuth = {
 	provider: KitOAuthProvider
@@ -23,7 +23,7 @@ export type MountedOAuth = {
  */
 export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 	const provider = new KitOAuthProvider(options)
-	const { service, tokens, store, login, publicUrl, mcpUrl } = options
+	const { service, tokens, store, login, publicUrl, mcpUrl, logger = log } = options
 
 	app.use(
 		mcpAuthRouter({
@@ -73,7 +73,7 @@ export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 			res.redirect(302, target.href)
 		} catch (error) {
 			if (!(error instanceof LoginError)) {
-				log.error('login failed', { message: messageOf(error) })
+				logger.error('login failed', { message: messageOf(error) })
 
 				return void fail(res, 'Не получилось войти', 'Попробуй ещё раз чуть позже.')
 			}
@@ -101,5 +101,5 @@ export {
 	type Login,
 	type LoginPageContext,
 } from './provider.ts'
-export { CODE_TTL_MS, memoryStore, sqliteStore, type AuthStore, type PendingCode } from './store.ts'
+export { CODE_TTL_MS, memoryStore, sqliteStore, type AuthStore, type PendingCode, type RefreshRecord } from './store.ts'
 export { ownClaims, Tokens, TTL, type TokenClaims, type TokenKind, type TokensOptions } from './tokens.ts'

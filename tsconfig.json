@@ -11,7 +11,7 @@
 		"verbatimModuleSyntax": true,
 		"noUncheckedIndexedAccess": true,
 		"skipLibCheck": true,
-		"customConditions": ["development"]
+		"customConditions": ["infra-mcp-kit-source"]
 	},
 	"include": ["src"]
 }

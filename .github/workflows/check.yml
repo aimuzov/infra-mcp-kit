@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@v5
       # Свой же action из этой ветки: так PR проверяет и изменения в нём.
       # У кита нет бинаря, вместо запуска сервера смотрим, что собранный пакет импортируется.
+      # `--conditions=development` -- как у сервера, который гоняет свои исходники:
+      # внутренние `#kit/*` не должны уводить его в `src`, которого в пакете нет.
       - uses: ./check
         with:
-          smoke: node -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"
+          smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"

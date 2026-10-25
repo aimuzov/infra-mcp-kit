@@ -3,13 +3,18 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js'
 import express, { type Express, type RequestHandler } from 'express'
 
-import { failPage } from '#kit/http/ui/index'
+import { errorPage } from '#kit/http/json'
 import { log, type Logger } from '#kit/log'
 import { messageOf } from '#kit/results'
 
 import { CALLBACK_PATH, KitOAuthProvider, LoginError, type ProviderOptions } from './provider.ts'
 
-export type OAuthOptions = ProviderOptions & { mcpUrl: URL; logger?: Logger }
+export type OAuthOptions = ProviderOptions & {
+	mcpUrl: URL
+	/** Имя сервиса в метаданных защищённого ресурса. */
+	resourceName: string
+	logger?: Logger
+}
 
 export type MountedOAuth = {
 	provider: KitOAuthProvider
@@ -23,22 +28,20 @@ export type MountedOAuth = {
  */
 export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 	const provider = new KitOAuthProvider(options)
-	const { service, tokens, store, login, publicUrl, mcpUrl, logger = log } = options
+	const { resourceName, tokens, store, login, publicUrl, mcpUrl, logger = log } = options
 
 	app.use(
 		mcpAuthRouter({
 			provider,
 			issuerUrl: publicUrl,
 			resourceServerUrl: mcpUrl,
-			resourceName: service.name,
+			resourceName,
 		}),
 	)
 
+	// Страница ошибки статическая, текст ей уходит в query: в нём нет ничего секретного.
 	const fail = (res: express.Response, title: string, message?: string) =>
-		res
-			.status(400)
-			.type('html')
-			.send(failPage({ service, title, message, code: 'invalid_request' }))
+		res.redirect(303, errorPage({ code: 'invalid_request', title, message }))
 
 	// GET для виджетов, которые возвращают человека ссылкой, POST для форм.
 	app.all(CALLBACK_PATH, express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
@@ -78,9 +81,8 @@ export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 				return void fail(res, 'Не получилось войти', 'Попробуй ещё раз чуть позже.')
 			}
 
-			res.status(400)
-				.type('html')
-				.send(await provider.renderLogin(raw, client, redirectUri, req, error.message))
+			// 303: после POST формы браузер идёт на страницу входа GET-ом.
+			res.redirect(303, provider.loginPage(raw, client, redirectUri, error.message))
 		}
 	})
 
@@ -93,13 +95,6 @@ export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 	}
 }
 
-export {
-	CALLBACK_PATH,
-	KitOAuthProvider,
-	LoginError,
-	type Grant,
-	type Login,
-	type LoginPageContext,
-} from './provider.ts'
+export { CALLBACK_PATH, KitOAuthProvider, LoginError, type Grant, type Login } from './provider.ts'
 export { CODE_TTL_MS, memoryStore, sqliteStore, type AuthStore, type PendingCode, type RefreshRecord } from './store.ts'
 export { ownClaims, Tokens, TTL, type TokenClaims, type TokenKind, type TokensOptions } from './tokens.ts'

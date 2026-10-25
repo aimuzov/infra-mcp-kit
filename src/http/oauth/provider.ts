@@ -15,7 +15,6 @@ import type {
 import type { Request, Response } from 'express'
 
 import { isAllowedRedirectUri } from '#kit/http/config'
-import type { Client, Service } from '#kit/http/ui/index'
 
 import type { AuthStore } from './store.ts'
 import { ownClaims, REFRESH_FAMILY_TTL, RESERVED_CLAIMS, type Tokens } from './tokens.ts'
@@ -29,25 +28,19 @@ export type Grant = {
 /** Ошибка входа, которую стоит показать человеку на той же странице. */
 export class LoginError extends Error {}
 
-export type LoginPageContext = {
-	service: Service
-	client: Client
-	/**
-	 * Адрес, куда вход должен вернуть человека: GET-ссылка для виджетов вроде Telegram
-	 * или `action` формы. В нём уже лежит подписанный запрос авторизации.
-	 */
-	callbackUrl: URL
-	/** Тот же запрос отдельно, для скрытого поля формы. */
-	request: string
-	error?: string
-}
-
 /**
  * Способ входа, который подключает сервис. Протокол, PKCE, коды и токены остаются на ките,
  * вход только рисует страницу и по возвращению говорит, кто это.
  */
 export type Login = {
-	render(context: LoginPageContext, req: Request): string | Promise<string>
+	/**
+	 * Статическая страница входа из `@aimuzov/infra-mcp-kit/astro`, например `/login`. Кит
+	 * редиректит на неё, а запрос, клиент и ошибку кладёт во фрагмент адреса: фрагмент
+	 * не уходит на сервер и в логи прокси.
+	 */
+	page: string
+	/** Что ещё положить во фрагмент страницы входа, например id для dev-входа на localhost. */
+	context?: Record<string, string>
 	/** Проверить то, с чем человек вернулся. `LoginError` покажет страницу входа снова. */
 	complete(req: Request): Grant | Promise<Grant>
 	/**
@@ -58,7 +51,6 @@ export type Login = {
 }
 
 export type ProviderOptions = {
-	service: Service
 	publicUrl: URL
 	tokens: Tokens
 	store: AuthStore
@@ -123,30 +115,23 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			state: params.state ?? '',
 		})
 
-		res.type('html').send(await this.renderLogin(request, client, params.redirectUri, res.req))
+		res.redirect(302, this.loginPage(request, client, params.redirectUri))
 	}
 
-	async renderLogin(
-		request: string,
-		client: OAuthClientInformationFull,
-		redirectUri: string,
-		req: Request,
-		error?: string,
-	): Promise<string> {
-		const callbackUrl = new URL(CALLBACK_PATH, this.options.publicUrl)
+	/** Адрес статической страницы входа с контекстом во фрагменте. */
+	loginPage(request: string, client: OAuthClientInformationFull, redirectUri: string, error?: string): string {
+		const { page, context } = this.options.login
+		const hash = new URLSearchParams({
+			...context,
+			request,
+			callback: CALLBACK_PATH,
+			client: client.client_name ?? '',
+			host: new URL(redirectUri).host,
+		})
 
-		callbackUrl.searchParams.set('request', request)
+		if (error) hash.set('error', error)
 
-		return this.options.login.render(
-			{
-				service: this.options.service,
-				client: { name: client.client_name, host: new URL(redirectUri).host },
-				callbackUrl,
-				request,
-				error,
-			},
-			req,
-		)
+		return `${page}#${hash}`
 	}
 
 	/** Выдать код по завершённому входу. Отдаёт адрес, куда редиректить. */

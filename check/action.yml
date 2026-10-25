@@ -42,6 +42,14 @@ runs:
       run: npm run lint
     - shell: bash
       run: npm run typecheck
+    # Страницы на Astro из `@aimuzov/infra-mcp-kit/astro` есть не у всех серверов:
+    # у stdio-коннекторов их нет, и шаг ничего не делает.
+    - shell: bash
+      run: |
+        if [[ -f astro.config.mjs ]]; then
+          npx astro check
+          npx svelte-check
+        fi
     - shell: bash
       run: npm test
     - shell: bash

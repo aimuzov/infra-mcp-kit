@@ -2,7 +2,6 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { Request } from 'express'
 
 import { LoginError, type Login } from '#kit/http/oauth/provider'
-import { consentPage, html } from '#kit/http/ui/index'
 
 /** Поля, которые Telegram Login Widget дописывает к auth URL. */
 export type TelegramUser = {
@@ -61,9 +60,6 @@ export function signTelegramLogin(fields: Record<string, string>, botToken: stri
 
 export type TelegramLoginOptions = {
 	botToken: string
-	botName: string
-	/** Что получит клиент, по пункту на строку. */
-	grants?: string[]
 	/**
 	 * Войти этим Telegram id без виджета. Виджет работает только на домене бота,
 	 * так сервер пробуют на localhost; задаётся через `devOnly`.
@@ -71,28 +67,8 @@ export type TelegramLoginOptions = {
 	devUserId?: string
 	/** Дополнительные claims по пользователю, например имя для кабинета. */
 	claims?: (user: TelegramUser) => Record<string, unknown>
-}
-
-/** Кнопка Telegram, а в dev-режиме обычная ссылка на тот же колбэк. */
-export function telegramButton(
-	authUrl: URL,
-	{ botName, devUserId }: Pick<TelegramLoginOptions, 'botName' | 'devUserId'>,
-) {
-	if (devUserId) {
-		const url = new URL(authUrl)
-
-		url.searchParams.set('dev', '1')
-
-		return html`<a class="btn btn--tg" href="${url.href}">Войти как ${devUserId} (dev)</a>`
-	}
-
-	return html`<script
-		async
-		src="https://telegram.org/js/telegram-widget.js?22"
-		data-telegram-login="${botName}"
-		data-size="large"
-		data-auth-url="${authUrl.href}"
-	></script>`
+	/** Статическая страница виджета, по умолчанию `/login/telegram` из `mcpPages`. */
+	page?: string
 }
 
 /** Кто это по запросу: подпись виджета или, на localhost, dev-ссылка. */
@@ -122,14 +98,9 @@ export function telegramLogin(options: TelegramLoginOptions): Login {
 	}
 
 	return {
-		render: ({ service, client, callbackUrl, error }) =>
-			consentPage({
-				service,
-				client,
-				grants: options.grants,
-				error,
-				action: telegramButton(callbackUrl, options),
-			}),
+		page: options.page ?? '/login/telegram',
+		// Страница входа покажет dev-ссылку вместо виджета: на localhost виджет не работает.
+		context: options.devUserId ? { dev: options.devUserId } : undefined,
 		complete(req) {
 			const user = telegramUser(req, options)
 

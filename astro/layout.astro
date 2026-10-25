@@ -1,0 +1,58 @@
+---
+// Общий каркас страниц коннектора. Тема, база корня, компоненты и подпись автора -- из
+// infra-site-kit, как у сайтов: "Сигнал" только переназначает их токены на свою палитру.
+import Credit from '@aimuzov/infra-site-kit/credit.astro'
+import { MARK, MARK_VIEWBOX } from '@aimuzov/infra-site-kit/mark.js'
+import ThemeBoot from '@aimuzov/infra-site-kit/theme-boot.astro'
+import config from 'virtual:infra-mcp-kit/pages'
+
+import ThemeToggle from '@aimuzov/infra-mcp-kit/astro/components/theme-toggle.svelte'
+
+import '@aimuzov/infra-site-kit/base.css'
+import '@aimuzov/infra-site-kit/ui/tokens.css'
+import '@aimuzov/infra-site-kit/theme-peek.css'
+import '@aimuzov/infra-mcp-kit/astro/styles/signal.css'
+import 'virtual:infra-mcp-kit/accent.css'
+
+type Props = {
+	title: string
+	/** Имя экрана на `<html data-screen>`: по нему стили сервиса могут отличать страницы. */
+	screen?: string
+}
+
+const { title, screen = 'page' } = Astro.props
+const { service } = config
+---
+
+<!doctype html>
+<html lang="ru" data-screen={screen}>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<title>{title}</title>
+		<ThemeBoot key="mcp:theme" />
+		<slot name="head" />
+	</head>
+	<body>
+		<div class="shell">
+			<header class="top">
+				<a class="brand" href="/">
+					<svg class="brand__mark" viewBox={MARK_VIEWBOX} fill="currentColor" aria-hidden="true">
+						<path fill-rule="evenodd" d={MARK}></path>
+					</svg>
+					<span class="brand__owner">aimuzov</span>
+					<span class="brand__slash">/</span>
+					<span class="brand__name">{service.name}</span>
+				</a>
+				<ThemeToggle client:load />
+			</header>
+			<main class="main">
+				<slot />
+			</main>
+			<footer class="foot">
+				<Credit repo={service.repo} />
+			</footer>
+		</div>
+	</body>
+</html>

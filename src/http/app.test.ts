@@ -6,26 +6,30 @@ import { after, describe, test } from 'node:test'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import {
-	callbackFrom,
 	connectHttp,
 	connectInMemory,
+	devLink,
 	expectTools,
-	hiddenField,
+	fakePages,
+	loginStep,
 	oauthFlow,
 	startHttp,
+	submitForm,
+	telegramSigned,
 	textOf,
 	type RunningHttp,
 } from '#kit/testing/index'
 
 import { createHttpApp, type HttpAppOptions } from './app.ts'
-import { signTelegramLogin, telegramLogin } from './login/telegram.ts'
+import { telegramLogin } from './login/telegram.ts'
 import { tokenFormLogin } from './login/token-form.ts'
 import { LoginError } from './oauth/provider.ts'
 import { memoryStore, sqliteStore, type AuthStore } from './oauth/store.ts'
 
 const SECRET = 'x'.repeat(32)
 const BOT = '123:bot'
-const service = { name: 'test', repo: 'https://github.com/aimuzov/test' }
+const service = { name: 'test' }
+const publicDir = fakePages()
 
 /** Сервер с одним инструментом, который рассказывает, кого видит. */
 function whoami(auth: { extra?: Record<string, unknown> } | undefined): McpServer {
@@ -51,7 +55,7 @@ after(() => Promise.all(running.map((r) => r.close())))
 
 async function start(options: Omit<HttpAppOptions, 'config' | 'service' | 'createServer'>) {
 	const http = await startHttp(
-		(base) => createHttpApp({ config: config(base), service, createServer: whoami, ...options }).app,
+		(base) => createHttpApp({ config: config(base), service, createServer: whoami, publicDir, ...options }).app,
 	)
 
 	running.push(http)
@@ -59,19 +63,8 @@ async function start(options: Omit<HttpAppOptions, 'config' | 'service' | 'creat
 	return http.base
 }
 
-/** Что делает виджет: дописывает подписанный вход к auth URL и идёт по нему. */
-const telegramWidget =
-	(id: string, bot = BOT) =>
-	(_page: string, callback: URL) => {
-		const login = signTelegramLogin(
-			{ id, first_name: 'Ivan', auth_date: String(Math.floor(Date.now() / 1000)) },
-			bot,
-		)
-
-		for (const [k, v] of Object.entries(login)) callback.searchParams.set(k, v)
-
-		return fetch(callback, { redirect: 'manual' })
-	}
+/** Что делает виджет: дописывает подписанный вход к адресу колбэка и идёт по нему. */
+const telegramWidget = (id: string, bot = BOT) => telegramSigned({ id, first_name: 'Ivan' }, bot)
 
 const stores: [string, () => AuthStore][] = [
 	['memory', memoryStore],
@@ -84,7 +77,7 @@ for (const [name, store] of stores) {
 			const base = await start({
 				auth: {
 					store: store(),
-					login: telegramLogin({ botToken: BOT, botName: 'bot', claims: (u) => ({ name: u.firstName }) }),
+					login: telegramLogin({ botToken: BOT, claims: (u) => ({ name: u.firstName }) }),
 				},
 			})
 			const flow = await oauthFlow({ base, login: telegramWidget('42') })
@@ -108,37 +101,52 @@ for (const [name, store] of stores) {
 }
 
 describe('OAuth: отказы', () => {
-	test('чужая подпись Telegram возвращает на страницу входа с ошибкой', async () => {
-		const base = await start({
-			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
-		})
-		const reg = await fetch(`${base}/register`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ redirect_uris: ['http://127.0.0.1:1/cb'], token_endpoint_auth_method: 'none' }),
-		})
-		const { client_id } = (await reg.json()) as { client_id: string }
-		const page = await fetch(
-			`${base}/authorize?${new URLSearchParams({
-				response_type: 'code',
-				client_id,
-				redirect_uri: 'http://127.0.0.1:1/cb',
-				code_challenge: 'x'.repeat(43),
-				code_challenge_method: 'S256',
-			})}`,
-		).then((r) => r.text())
-		const res = await telegramWidget('42', 'other-bot')(page, callbackFrom(page, base))
+	test('authorize ведёт на статическую страницу входа с контекстом во фрагменте', async () => {
+		const base = await start({ auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) } })
+		const step = await authorizeStep(base)
 
-		assert.equal(res.status, 400)
-		assert.match(await res.text(), /Telegram не подтвердил вход/)
+		assert.equal(step.page, '/login/telegram')
+		assert.equal(step.client, 'test')
+		assert.equal(step.host, '127.0.0.1:1')
+		assert.equal(step.callback.pathname, '/authorize/callback')
+		assert.match(await (await fetch(new URL(step.page, base))).text(), /page:login\/telegram/)
+	})
+
+	test('чужая подпись Telegram возвращает на страницу входа с ошибкой во фрагменте', async () => {
+		const base = await start({ auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) } })
+		const res = await telegramWidget('42', 'other-bot')(await authorizeStep(base))
+
+		assert.equal(res.status, 303)
+
+		const again = loginStep(res.headers.get('location') ?? '', base)
+
+		assert.equal(again.page, '/login/telegram')
+		assert.match(again.error, /Telegram не подтвердил вход/)
+	})
+
+	test('dev-вход Telegram: id во фрагменте и вход по ссылке без подписи', async () => {
+		const base = await start({
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, devUserId: '7' }) },
+		})
+
+		assert.equal((await authorizeStep(base)).dev, '7')
+
+		const flow = await oauthFlow({ base, login: devLink() })
+		const client = await connectHttp(base, flow.tokens.access_token)
+
+		assert.match(textOf(await client.callTool({ name: 'whoami' })), /"subject":"7"/)
+		await client.close()
 	})
 
 	test('колбэк без подписанного запроса и регистрация чужого redirect отклоняются', async () => {
 		const base = await start({
-			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) },
 		})
 
-		assert.equal((await fetch(`${base}/authorize/callback?request=forged`)).status, 400)
+		const forged = await fetch(`${base}/authorize/callback?request=forged`, { redirect: 'manual' })
+
+		assert.equal(forged.status, 303)
+		assert.match(forged.headers.get('location') ?? '', /^\/error\?code=invalid_request&title=/)
 
 		const reg = await fetch(`${base}/register`, {
 			method: 'POST',
@@ -151,7 +159,7 @@ describe('OAuth: отказы', () => {
 
 	test('без токена /mcp отвечает 401 с адресом метаданных, не POST -- 405', async () => {
 		const base = await start({
-			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) },
 		})
 		const res = await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })
 
@@ -164,7 +172,7 @@ describe('OAuth: отказы', () => {
 	// На 500 клиент не обновляет токен, и коннектор отваливается, когда истекает access.
 	test('битый токен на /mcp даёт 401, а не 500', async () => {
 		const base = await start({
-			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) },
 		})
 		const res = await fetch(`${base}/mcp`, {
 			method: 'POST',
@@ -179,8 +187,7 @@ describe('OAuth: отказы', () => {
 
 describe('OAuth через форму токена с шифрованием', () => {
 	const login = tokenFormLogin({
-		title: 'Подключение',
-		fields: [{ name: 'token', label: 'API-токен', type: 'password' }],
+		fields: [{ name: 'token', label: 'API-токен' }],
 		verify: ({ token }) => {
 			if (token !== 'good') throw new LoginError('Токен не подошёл')
 
@@ -188,13 +195,7 @@ describe('OAuth через форму токена с шифрованием', (
 		},
 	})
 
-	const submit = (token: string) => (page: string, callback: URL) =>
-		fetch(callback, {
-			method: 'POST',
-			redirect: 'manual',
-			headers: { 'content-type': 'application/x-www-form-urlencoded' },
-			body: new URLSearchParams({ request: hiddenField(page, 'request'), token }),
-		})
+	const submit = (token: string) => submitForm({ token })
 
 	test('секрет едет в claims до инструмента, но не читается из токена', async () => {
 		const base = await start({ auth: { store: memoryStore(), login, tokens: 'encrypt' } })
@@ -240,8 +241,8 @@ describe('OAuth через форму токена с шифрованием', (
 })
 
 describe('без OAuth', () => {
-	test('/mcp открыт, есть лендинг, /health, ассеты и 404 страницей кита', async () => {
-		const base = await start({ landing: { tagline: 'Тестовый коннектор', tools: ['whoami'] } })
+	test('/mcp открыт, страницы из publicDir, /health и 404 страницей', async () => {
+		const base = await start({})
 		const client = await connectHttp(base)
 
 		assert.equal(textOf(await client.callTool({ name: 'whoami' })), 'null')
@@ -249,15 +250,71 @@ describe('без OAuth', () => {
 
 		const landing = await fetch(base)
 
-		assert.match(landing.headers.get('content-security-policy') ?? '', /default-src 'self'/)
-		assert.match(await landing.text(), /Тестовый коннектор[\s\S]*\/mcp/)
+		assert.equal(landing.headers.get('content-security-policy'), "frame-ancestors 'none'")
+		assert.match(await landing.text(), /page:index/)
+		assert.match(await (await fetch(`${base}/login`)).text(), /page:login/)
 		assert.deepEqual(await (await fetch(`${base}/health`)).json(), { ok: true })
-		assert.match((await fetch(`${base}/_kit/kit.css`)).headers.get('content-type') ?? '', /text\/css/)
-		assert.match(await (await fetch(`${base}/_kit/service.css`)).text(), /--hue-light/)
-		assert.equal((await fetch(`${base}/nope`)).status, 404)
+
+		const missing = await fetch(`${base}/nope`, { headers: { accept: 'text/html' } })
+
+		assert.equal(missing.status, 404)
+		assert.match(await missing.text(), /page:404/)
+
+		const api = await fetch(`${base}/nope`, { headers: { accept: 'application/json' } })
+
+		assert.equal(api.status, 404)
+		assert.deepEqual(await api.json(), { error: { code: 'not_found', message: 'Not found' } })
+	})
+
+	test('без страниц коннектор отдаёт только JSON и строгую CSP', async () => {
+		const base = await start({ publicDir: undefined })
+
+		assert.match((await fetch(base)).headers.get('content-security-policy') ?? '', /default-src 'none'/)
+		assert.equal((await fetch(`${base}/`, { headers: { accept: 'text/html' } })).status, 404)
+	})
+
+	test('с OAuth, но без publicDir не стартует: входу нужна страница', () => {
+		assert.throws(
+			() =>
+				createHttpApp({
+					config: config('http://127.0.0.1:1'),
+					service,
+					createServer: whoami,
+					auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT }) },
+				}),
+			/publicDir/,
+		)
 	})
 
 	test('connectInMemory видит инструменты сервера', async () => {
 		await expectTools(await connectInMemory(whoami(undefined)), ['whoami'])
 	})
 })
+
+/** Зарегистрировать клиента и дойти до редиректа на страницу входа. */
+async function authorizeStep(base: string) {
+	const reg = await fetch(`${base}/register`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({
+			client_name: 'test',
+			redirect_uris: ['http://127.0.0.1:1/cb'],
+			token_endpoint_auth_method: 'none',
+		}),
+	})
+	const { client_id } = (await reg.json()) as { client_id: string }
+	const res = await fetch(
+		`${base}/authorize?${new URLSearchParams({
+			response_type: 'code',
+			client_id,
+			redirect_uri: 'http://127.0.0.1:1/cb',
+			code_challenge: 'x'.repeat(43),
+			code_challenge_method: 'S256',
+		})}`,
+		{ redirect: 'manual' },
+	)
+
+	assert.equal(res.status, 302)
+
+	return loginStep(res.headers.get('location') ?? '', base)
+}

@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.0](https://github.com/aimuzov/infra-mcp-kit/compare/v2.0.0...v2.1.0) (2026-10-25)
+
+
+### Features
+
+* **check:** add coverage-lines, astro-tsconfig and ui inputs ([6cfcd6a](https://github.com/aimuzov/infra-mcp-kit/commit/6cfcd6aeb07af2170a1eda0086a69a92f2cd4826))
+* cover the kit before tmcp, tighten the CSP and add coverage to the check action ([9ba08cf](https://github.com/aimuzov/infra-mcp-kit/commit/9ba08cf3a4bab9b38b1c0e3446c43996bb2252ff))
+* **testing:** expose Login.context in loginStep ([ca0ed20](https://github.com/aimuzov/infra-mcp-kit/commit/ca0ed2096a20249fcf0038eaa020d82694a84672))
+
+
+### Bug Fixes
+
+* **pages:** drop inline style attributes from the CSP and make @types/express an optional peer ([5ca6c76](https://github.com/aimuzov/infra-mcp-kit/commit/5ca6c768f7328d9caf7030088d770b76891242f0))
+* **pages:** ship CopyValue styles on the landing and keep hints left-aligned ([35dde62](https://github.com/aimuzov/infra-mcp-kit/commit/35dde6201636dc6ae35430ccfefc0a0d104dead9))
+
 ## [2.0.0](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.3...v2.0.0) (2026-10-25)
 
 

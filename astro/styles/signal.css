@@ -436,7 +436,11 @@ h1 {
 	margin: 0;
 	font-size: 13px;
 	color: var(--signal-muted);
-	text-align: center;
+
+	/* По центру только под формой входа; заметки в кабинете идут по левому краю, как текст. */
+	&.hint--center {
+		text-align: center;
+	}
 }
 
 .form {

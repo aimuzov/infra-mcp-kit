@@ -66,7 +66,7 @@
 		{:else}
 			<div class="telegram" bind:this={widget}></div>
 		{/if}
-		<p class="hint">Если ты не начинал подключение сам, просто закрой страницу.</p>
+		<p class="hint hint--center">Если ты не начинал подключение сам, просто закрой страницу.</p>
 	</Card>
 </div>
 

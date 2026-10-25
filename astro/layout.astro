@@ -1,0 +1,60 @@
+---
+// Общий каркас страниц коннектора. Тема и подпись автора -- из infra-site-kit, как у сайтов.
+import Credit from '@aimuzov/infra-site-kit/credit.astro'
+import { MARK, MARK_VIEWBOX } from '@aimuzov/infra-site-kit/mark.js'
+import ThemeBoot from '@aimuzov/infra-site-kit/theme-boot.astro'
+import config from 'virtual:infra-mcp-kit/pages'
+
+import '@aimuzov/infra-mcp-kit/kit.css'
+
+type Props = { title: string; screen?: string }
+
+const { title, screen = 'page' } = Astro.props
+const { service } = config
+---
+
+<!doctype html>
+<html lang="ru" data-screen={screen}>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<title>{title}</title>
+		<ThemeBoot key="mcp:theme" />
+		<slot name="head" />
+	</head>
+	<body>
+		<div class="shell">
+			<header class="top">
+				<a class="brand" href="/">
+					<svg class="brand__mark" viewBox={MARK_VIEWBOX} aria-hidden="true">
+						<path fill-rule="evenodd" d={MARK} />
+					</svg>
+					<span class="brand__owner">aimuzov</span>
+					<span class="brand__slash">/</span>
+					<span class="brand__name">{service.name}</span>
+				</a>
+				<button class="theme" type="button" aria-label="Сменить тему" data-theme-toggle>
+					<span></span>
+				</button>
+			</header>
+			<main class="main">
+				<slot />
+			</main>
+			<Credit repo={service.repo} />
+		</div>
+		<script>
+			import { toggleTheme } from '@aimuzov/infra-site-kit/theme.js'
+
+			document.addEventListener('click', (event) => {
+				const target = event.target instanceof Element ? event.target : null
+
+				if (target?.closest('[data-theme-toggle]')) toggleTheme({ key: 'mcp:theme' })
+
+				const copy = target?.closest('[data-copy]')
+
+				if (copy) void navigator.clipboard?.writeText(copy.getAttribute('data-copy') ?? '')
+			})
+		</script>
+	</body>
+</html>

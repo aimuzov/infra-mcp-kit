@@ -12,6 +12,8 @@ export type TokenFormLoginOptions = {
 	 * `LoginError` вернёт человека на форму с текстом ошибки.
 	 */
 	verify(values: Record<string, string>): Grant | Promise<Grant>
+	/** Статическая страница формы из `/astro`, обычно `/login`. Тогда HTML на сервере не рисуется. */
+	page?: string
 }
 
 /**
@@ -22,6 +24,7 @@ export type TokenFormLoginOptions = {
 export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 	return {
 		sealsSecrets: true,
+		page: options.page,
 		render: ({ service, client, callbackUrl, request, error }) => {
 			const action = new URL(callbackUrl)
 

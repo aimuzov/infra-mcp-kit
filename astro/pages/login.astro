@@ -1,0 +1,12 @@
+---
+import config from 'virtual:infra-mcp-kit/pages'
+
+import TokenForm from '@aimuzov/infra-mcp-kit/astro/components/token-form.svelte'
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+
+const { service, tokenForm } = config
+---
+
+<Layout title={`Вход в ${service.name}`} screen="consent">
+	<TokenForm client:load service={service.name} {...tokenForm!} />
+</Layout>

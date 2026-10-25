@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs'
 import type { Server } from 'node:http'
+import { join } from 'node:path'
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -44,12 +46,50 @@ export type HttpAppOptions = {
 	routes?(app: Express, context: HttpContext): void
 	/** Куда писать ошибки `/mcp` и входа. По умолчанию общий `log` кита. */
 	logger?: Logger
+	/**
+	 * Каталог со страницами, которые собрал Astro через `@aimuzov/infra-mcp-kit/astro`, обычно
+	 * `build/public`. С ним кит раздаёт файлы как есть и не рисует HTML сам: лендинг и 404
+	 * берутся оттуда, а CSP страниц Astro кладёт в их `<meta>`.
+	 */
+	publicDir?: string
 }
 
 /** Заголовки для всех ответов: CSP страниц кита и запрет встраивать их во фрейм. */
 const securityHeaders: RequestHandler = (_req, res, next) => {
 	res.set({
 		'Content-Security-Policy': CSP,
+		'X-Content-Type-Options': 'nosniff',
+		'Referrer-Policy': 'strict-origin-when-cross-origin',
+	})
+
+	next()
+}
+
+/**
+ * Страницы Astro в формате `file`: `/login` -> `login.html`. `express.static` с `extensions`
+ * так не умеет, когда рядом лежит каталог `login/` от `/login/telegram`: он видит каталог
+ * и уходит в редирект на `/login/` или в 404.
+ */
+function pages(root: string): RequestHandler {
+	return (req, res, next) => {
+		if (req.method !== 'GET' && req.method !== 'HEAD') return void next()
+
+		const name = req.path === '/' ? 'index' : req.path.slice(1).replace(/\/$/, '')
+
+		// Только простые имена страниц: ни точек, ни обратных слешей, ни выхода из каталога.
+		if (!/^[a-z0-9/-]+$/i.test(name) || name.includes('..')) return void next()
+
+		if (!existsSync(join(root, `${name}.html`))) return void next()
+
+		// С `root` send ищет точки только в пути внутри него, иначе каталог сервера
+		// вроде `.claude/...` отдал бы 404.
+		res.sendFile(`${name}.html`, { root })
+	}
+}
+
+const staticHeaders: RequestHandler = (_req, res, next) => {
+	res.set({
+		'Content-Security-Policy': "frame-ancestors 'none'",
 		'X-Content-Type-Options': 'nosniff',
 		'Referrer-Policy': 'strict-origin-when-cross-origin',
 	})
@@ -81,7 +121,9 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 	// Перед нами Caddy с TLS; лимитам запросов в SDK нужен адрес клиента, а не прокси.
 	app.set('trust proxy', 1)
 	app.disable('x-powered-by')
-	app.use(securityHeaders)
+	// У статики Astro своя CSP в `<meta>`; заголовок с другой политикой их пересёк бы.
+	// `frame-ancestors` в `<meta>` не работает, поэтому он один и остаётся заголовком.
+	app.use(options.publicDir ? staticHeaders : securityHeaders)
 
 	for (const [name, { type, body }] of Object.entries(assets(service))) {
 		app.get(
@@ -135,7 +177,10 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 
 	app.all('/mcp', (_req, res) => void res.status(405).set('Allow', 'POST').end())
 
-	if (options.landing !== false) {
+	if (options.publicDir) {
+		app.use(pages(options.publicDir))
+		app.use(express.static(options.publicDir, { index: false, redirect: false }))
+	} else if (options.landing !== false) {
 		const page = landingPage({ service, mcpUrl: mcpUrl.href, tagline: '', ...options.landing })
 
 		app.get('/', (_req, res) => void res.type('html').send(page))
@@ -144,6 +189,8 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 	options.routes?.(app, context)
 
 	app.use((_req, res) => {
+		if (options.publicDir) return void res.status(404).sendFile('404.html', { root: options.publicDir })
+
 		res.status(404)
 			.type('html')
 			.send(failPage({ service, title: 'Такой страницы нет', code: '404' }))

@@ -2,3 +2,10 @@ node_modules
 build
 *.tgz
 .env
+spike/kit.tgz
+spike/shots
+spike/connector/node_modules
+spike/connector/build
+spike/connector/.astro
+spike/connector/server.log
+spike/connector/package-lock.json

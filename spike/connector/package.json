@@ -1,0 +1,23 @@
+{
+	"name": "spike-connector",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build:pages": "astro build",
+		"start": "node src/server.ts"
+	},
+	"dependencies": {
+		"@aimuzov/infra-mcp-kit": "file:../kit.tgz",
+		"@modelcontextprotocol/sdk": "1.32.1",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.0.0",
+		"@astrojs/svelte": "9.0.1",
+		"astro": "7.3.7",
+		"svelte": "5.57.2"
+	},
+	"imports": {
+		"#frontend/*": "./src/frontend/*"
+	}
+}

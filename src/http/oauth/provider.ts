@@ -47,7 +47,12 @@ export type LoginPageContext = {
  * вход только рисует страницу и по возвращению говорит, кто это.
  */
 export type Login = {
-	render(context: LoginPageContext, req: Request): string | Promise<string>
+	/**
+	 * Статическая страница входа, собранная Astro. Тогда кит редиректит на неё, а запрос,
+	 * клиент и ошибку кладёт во фрагмент адреса: фрагмент не уходит на сервер и в логи прокси.
+	 */
+	page?: string
+	render?(context: LoginPageContext, req: Request): string | Promise<string>
 	/** Проверить то, с чем человек вернулся. `LoginError` покажет страницу входа снова. */
 	complete(req: Request): Grant | Promise<Grant>
 	/**
@@ -123,7 +128,29 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			state: params.state ?? '',
 		})
 
+		const page = this.loginPage(request, client, params.redirectUri)
+
+		if (page) return void res.redirect(302, page)
+
 		res.type('html').send(await this.renderLogin(request, client, params.redirectUri, res.req))
+	}
+
+	/** Адрес статической страницы входа с контекстом во фрагменте, если она у входа есть. */
+	loginPage(request: string, client: OAuthClientInformationFull, redirectUri: string, error?: string) {
+		const { page } = this.options.login
+
+		if (!page) return undefined
+
+		const hash = new URLSearchParams({
+			request,
+			callback: CALLBACK_PATH,
+			client: client.client_name ?? '',
+			host: new URL(redirectUri).host,
+		})
+
+		if (error) hash.set('error', error)
+
+		return `${page}#${hash}`
 	}
 
 	async renderLogin(
@@ -136,6 +163,8 @@ export class KitOAuthProvider implements OAuthServerProvider {
 		const callbackUrl = new URL(CALLBACK_PATH, this.options.publicUrl)
 
 		callbackUrl.searchParams.set('request', request)
+
+		if (!this.options.login.render) throw new Error('У входа нет ни `page`, ни `render`')
 
 		return this.options.login.render(
 			{

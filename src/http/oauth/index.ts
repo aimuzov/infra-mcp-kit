@@ -78,6 +78,11 @@ export function mountOAuth(app: Express, options: OAuthOptions): MountedOAuth {
 				return void fail(res, 'Не получилось войти', 'Попробуй ещё раз чуть позже.')
 			}
 
+			const page = provider.loginPage(raw, client, redirectUri, error.message)
+
+			// 303: после POST формы браузер идёт на страницу входа GET-ом.
+			if (page) return void res.redirect(303, page)
+
 			res.status(400)
 				.type('html')
 				.send(await provider.renderLogin(raw, client, redirectUri, req, error.message))

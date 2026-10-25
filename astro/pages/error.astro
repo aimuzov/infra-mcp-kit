@@ -1,0 +1,27 @@
+---
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+---
+
+<Layout title="Ошибка" screen="fail">
+	<section class="panel fail">
+		<p class="code" data-code>
+			error
+		</p>
+		<h1 data-title>Что-то пошло не так</h1>
+		<p class="muted" data-message></p>
+		<a class="btn btn--ghost" href="/">
+			На главную
+		</a>
+	</section>
+	<script>
+		// Сервер редиректит сюда с ?title=&message=&code=; текст ставим через textContent, не HTML.
+		const query = new URLSearchParams(location.search)
+
+		for (const key of ['code', 'title', 'message']) {
+			const value = query.get(key)
+			const node = document.querySelector(`[data-${key}]`)
+
+			if (value && node) node.textContent = value
+		}
+	</script>
+</Layout>

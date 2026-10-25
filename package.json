@@ -32,10 +32,17 @@
 		"./testing": {
 			"types": "./build/testing/index.d.ts",
 			"default": "./build/testing/index.js"
-		}
+		},
+		"./astro": {
+			"types": "./build/astro/index.d.ts",
+			"default": "./build/astro/index.js"
+		},
+		"./astro/*": "./astro/*",
+		"./kit.css": "./build/http/ui/assets/kit.css"
 	},
 	"files": [
-		"build"
+		"build",
+		"astro"
 	],
 	"publishConfig": {
 		"access": "public",
@@ -64,11 +71,14 @@
 	},
 	"devDependencies": {
 		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.0.0",
+		"@astrojs/svelte": "9.0.1",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@types/node": "26.6.5",
+		"astro": "7.3.7",
 		"oxlint": "1.87.0",
 		"playwright": "1.64.0",
 		"prettier": "3.9.9",
+		"svelte": "5.57.2",
 		"typescript": "6.0.3"
 	},
 	"imports": {

@@ -17,12 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # Свой же action из этой ветки: так PR проверяет и изменения в нём.
-      # У кита нет бинаря, вместо запуска сервера смотрим, что собранный пакет импортируется.
-      # `--conditions=development` -- как у сервера, который гоняет свои исходники:
-      # внутренние `#kit/*` не должны уводить его в `src`, которого в пакете нет.
+      # У кита нет бинаря, вместо запуска сервера смотрим, что установленный тарбол
+      # импортируется. `--conditions=development` -- как у сервера, который гоняет
+      # свои исходники: внутренние `#kit/*` не должны уводить его в `src`.
       - uses: ./check
         with:
-          smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"
+          smoke: ''
+          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"
       # Экраны UI в настоящем Chromium: CSP режет инлайн-код молча,
       # это видно только в консоли браузера. Браузер кэшируется по версии
       # Playwright, системные библиотеки ставятся из apt каждый прогон.

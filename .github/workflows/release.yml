@@ -33,8 +33,13 @@ jobs:
     if: needs.release.outputs.created == 'true'
     uses: ./.github/workflows/check.yml
 
+  # После публикации: тег v1 не должен указывать на версию, которой нет в npm.
+  # Публикация выключена, пока нет доступа к npm, тогда тег двигается и без неё.
   major-tag:
-    needs: [release, check]
+    needs: [release, check, publish]
+    if: >-
+      !cancelled() && needs.check.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

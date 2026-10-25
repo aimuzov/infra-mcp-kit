@@ -6,16 +6,23 @@ import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { Client, type ClientOptions } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { Express } from 'express'
 
-/** Клиент, подключённый к серверу через пару транспортов в памяти. */
-export async function connectInMemory(server: McpServer): Promise<Client> {
-	const client = new Client({ name: 'test', version: '0.0.0' })
+/** Подпись входа как у Telegram: в `/http` она останется до 2.0 ради совместимости. */
+export { signTelegramLogin } from '#kit/http/login/telegram'
+
+/**
+ * Клиент, подключённый к серверу через пару транспортов в памяти. Во втором
+ * аргументе возможности клиента, например `{ capabilities: { elicitation: {} } }`
+ * для тестов запросов к человеку.
+ */
+export async function connectInMemory(server: McpServer, options?: ClientOptions): Promise<Client> {
+	const client = new Client({ name: 'test', version: '0.0.0' }, options)
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
 
 	await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
@@ -87,6 +94,8 @@ export type OAuthFlowResult = {
 	tokens: { access_token: string; refresh_token?: string; expires_in?: number }
 	/** Обменять код ещё раз, чтобы проверить его одноразовость. */
 	exchangeAgain(): Promise<Response>
+	/** Обновить токены refresh-токеном, по умолчанию выданным при входе. */
+	refresh(refreshToken?: string): Promise<Response>
 }
 
 /** Достать адрес колбэка со страницы входа: из виджета Telegram, ссылки или формы. */
@@ -167,12 +176,20 @@ export async function oauthFlow({
 
 	assert.equal(token.status, 200, await token.clone().text())
 
+	const tokens = (await token.json()) as OAuthFlowResult['tokens']
+
 	return {
 		clientId,
 		code,
 		verifier,
-		tokens: (await token.json()) as OAuthFlowResult['tokens'],
+		tokens,
 		exchangeAgain: exchange,
+		refresh: (refreshToken = tokens.refresh_token ?? '') =>
+			fetch(`${base}/token`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/x-www-form-urlencoded' },
+				body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }),
+			}),
 	}
 }
 

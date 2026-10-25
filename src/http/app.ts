@@ -2,9 +2,10 @@ import type { Server } from 'node:http'
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import express, { type Express, type RequestHandler } from 'express'
+import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express'
 
-import { log } from '#kit/log'
+import { log as defaultLog, type Logger } from '#kit/log'
+import { messageOf } from '#kit/results'
 
 import type { HttpConfig } from './config.ts'
 import { mountOAuth, type KitOAuthProvider, type Login } from './oauth/index.ts'
@@ -41,6 +42,8 @@ export type HttpAppOptions = {
 	landing?: Omit<LandingOptions, 'service' | 'mcpUrl'> | false
 	/** Свои маршруты, например кабинет. Ставятся после OAuth и `/mcp`, до 404. */
 	routes?(app: Express, context: HttpContext): void
+	/** Куда писать ошибки `/mcp` и входа. По умолчанию общий `log` кита. */
+	logger?: Logger
 }
 
 /** Заголовки для всех ответов: CSP страниц кита и запрет встраивать их во фрейм. */
@@ -62,7 +65,7 @@ const securityHeaders: RequestHandler = (_req, res, next) => {
  * а перезапуск не рвёт сессии.
  */
 export function createHttpApp(options: HttpAppOptions): { app: Express; context: HttpContext } {
-	const { config, service, auth } = options
+	const { config, service, auth, logger = defaultLog } = options
 	const app = express()
 	const mcpUrl = new URL('/mcp', config.publicUrl)
 	const tokens =
@@ -70,6 +73,10 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 			? auth.tokens
 			: new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href, mode: auth?.tokens ?? 'sign' })
 	const context: HttpContext = { config, service, mcpUrl, tokens }
+
+	if (auth?.login.sealsSecrets && tokens.mode !== 'encrypt') {
+		throw new Error('Вход кладёт в токены чужой секрет: нужен `tokens: "encrypt"`, иначе он поедет открытым')
+	}
 
 	// Перед нами Caddy с TLS; лимитам запросов в SDK нужен адрес клиента, а не прокси.
 	app.set('trust proxy', 1)
@@ -96,6 +103,7 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 			store: auth.store,
 			login: auth.login,
 			allowedRedirectUris: config.allowedRedirectUris,
+			logger,
 		})
 
 		bearer = mounted.bearer
@@ -105,22 +113,23 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 	const handlers: RequestHandler[] = [...(bearer ? [bearer] : []), express.json({ limit: '4mb' })]
 
 	app.post('/mcp', ...handlers, async (req, res) => {
-		const server = await options.createServer(req.auth)
-		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
-
-		res.on('close', () => {
-			void transport.close()
-			void server.close()
-		})
-
 		try {
+			// Фабрика сервиса тоже может упасть, например на кривом subject: это внутри try,
+			// чтобы ответом был JSON-RPC, а не HTML-страница express со стеком.
+			const server = await options.createServer(req.auth)
+			const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+
+			res.on('close', () => {
+				void transport.close()
+				void server.close()
+			})
+
 			await server.connect(transport)
 			await transport.handleRequest(req, res, req.body)
 		} catch (error) {
-			log.error('mcp request failed', { message: error instanceof Error ? error.message : String(error) })
+			logger.error('mcp request failed', { message: messageOf(error) })
 
-			if (!res.headersSent)
-				res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null })
+			if (!res.headersSent) res.status(500).json(INTERNAL_ERROR)
 		}
 	})
 
@@ -140,17 +149,53 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 			.send(failPage({ service, title: 'Такой страницы нет', code: '404' }))
 	})
 
+	// Без своего обработчика ошибку маршрута сервиса express отдал бы своей HTML-страницей,
+	// вне production -- со стеком, и мимо лога.
+	const onError: ErrorRequestHandler = (error, req, res, next) => {
+		logger.error('request failed', { path: req.path, message: messageOf(error) })
+
+		if (res.headersSent) return void next(error)
+
+		if (req.path === '/mcp') return void res.status(500).json(INTERNAL_ERROR)
+
+		res.status(500)
+			.type('html')
+			.send(
+				failPage({ service, title: 'Что-то сломалось', message: 'Попробуй ещё раз чуть позже.', code: '500' }),
+			)
+	}
+
+	app.use(onError)
+
 	return { app, context }
+}
+
+const INTERNAL_ERROR = { jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }
+
+/**
+ * Слушать порт. Ошибка `listen` (порт занят, нет прав) отклоняет промис: express 5
+ * отдаёт её в тот же колбэк, и без проверки сервер написал бы "listening" и вышел.
+ */
+export function listen(app: Express, port: number, message = `listening on :${port}`, logger = defaultLog) {
+	return new Promise<Server>((resolve, reject) => {
+		const server = app.listen(port, (error?: Error) => {
+			if (error) return void reject(error)
+
+			logger.info(message)
+			resolve(server)
+		})
+	})
 }
 
 /** Поднять коннектор на `config.port`. */
 export function serveHttp(options: HttpAppOptions): Promise<Server> {
 	const { app } = createHttpApp(options)
+	const { config, service } = options
 
-	return new Promise((resolve) => {
-		const server = app.listen(options.config.port, () => {
-			log.info(`${options.service.name} listening on :${options.config.port} as ${options.config.publicUrl.href}`)
-			resolve(server)
-		})
-	})
+	return listen(
+		app,
+		config.port,
+		`${service.name} listening on :${config.port} as ${config.publicUrl.href}`,
+		options.logger,
+	)
 }

@@ -107,6 +107,20 @@ export function telegramUser(
 
 /** Вход через Telegram Login Widget: виджет возвращает человека GET-ссылкой с подписанным query. */
 export function telegramLogin(options: TelegramLoginOptions): Login {
+	// Подписанный query из истории браузера иначе годился бы на чужой вход до MAX_AGE_SECONDS.
+	// Память процесса: после рестарта окно повтора то же, что и без этой проверки.
+	const used = new Map<string, number>()
+
+	const spend = (hash: string, now = Date.now()) => {
+		for (const [key, expiresAt] of used) if (expiresAt < now) used.delete(key)
+
+		if (used.has(hash)) return false
+
+		used.set(hash, now + MAX_AGE_SECONDS * 1000)
+
+		return true
+	}
+
 	return {
 		render: ({ service, client, callbackUrl, error }) =>
 			consentPage({
@@ -120,6 +134,10 @@ export function telegramLogin(options: TelegramLoginOptions): Login {
 			const user = telegramUser(req, options)
 
 			if (!user) throw new LoginError('Telegram не подтвердил вход, попробуй ещё раз')
+
+			const hash = typeof req.query.hash === 'string' ? req.query.hash : ''
+
+			if (hash && !spend(hash)) throw new LoginError('Эта ссылка входа уже использована, войди ещё раз')
 
 			return { subject: user.id, claims: options.claims?.(user) }
 		},

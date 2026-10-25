@@ -1,4 +1,4 @@
-export { createHttpApp, serveHttp, type HttpAppOptions, type HttpAuthOptions, type HttpContext } from './app.ts'
+export { createHttpApp, listen, serveHttp, type HttpAppOptions, type HttpAuthOptions, type HttpContext } from './app.ts'
 export {
 	CLAUDE_CALLBACKS,
 	devOnly,
@@ -36,6 +36,7 @@ export {
 	type MountedOAuth,
 	type OAuthOptions,
 	type PendingCode,
+	type RefreshRecord,
 	type TokenClaims,
 	type TokenKind,
 	type TokensOptions,

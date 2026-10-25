@@ -93,16 +93,16 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			getClient: (id) => store.getClient(id),
 			registerClient: (client) => {
 				if (client.redirect_uris.length > MAX_REDIRECT_URIS) {
-					throw new InvalidClientMetadataError(`Больше ${MAX_REDIRECT_URIS} redirect_uris`)
+					throw new InvalidClientMetadataError(`More than ${MAX_REDIRECT_URIS} redirect_uris`)
 				}
 
 				if (Buffer.byteLength(JSON.stringify(client)) > MAX_CLIENT_BYTES) {
-					throw new InvalidClientMetadataError(`Метаданные клиента больше ${MAX_CLIENT_BYTES} байт`)
+					throw new InvalidClientMetadataError(`Client metadata is over ${MAX_CLIENT_BYTES} bytes`)
 				}
 
 				const bad = client.redirect_uris.find((uri) => !isAllowedRedirectUri(uri, allowedRedirectUris))
 
-				if (bad) throw new InvalidClientMetadataError(`redirect_uri не разрешён: ${bad}`)
+				if (bad) throw new InvalidClientMetadataError(`redirect_uri is not allowed: ${bad}`)
 
 				// client_id и время регистрации проставил обработчик SDK.
 				const full = client as OAuthClientInformationFull
@@ -175,7 +175,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {
 		const pending = this.options.store.peekCode(code)
 
-		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Код недействителен')
+		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
 
 		return pending.codeChallenge
 	}
@@ -188,14 +188,14 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	): Promise<OAuthTokens> {
 		const pending = this.options.store.takeCode(code)
 
-		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Код недействителен')
+		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
 
 		// RFC 6749 4.1.3: redirect_uri был в запросе авторизации, значит обязателен и здесь.
-		if (redirectUri !== pending.redirectUri) throw new InvalidGrantError('redirect_uri не совпадает')
+		if (redirectUri !== pending.redirectUri) throw new InvalidGrantError('redirect_uri does not match')
 
 		const grant = await this.options.tokens.verify('grant', pending.grant)
 
-		if (!grant) throw new InvalidGrantError('Код недействителен')
+		if (!grant) throw new InvalidGrantError('Invalid authorization code')
 
 		const authTime = typeof grant.auth_time === 'number' ? grant.auth_time : Math.floor(Date.now() / 1000)
 
@@ -212,7 +212,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 		const claims = await tokens.verify('refresh', refreshToken)
 
 		if (!claims || claims.client_id !== client.client_id) {
-			throw new InvalidGrantError('Refresh-токен недействителен')
+			throw new InvalidGrantError('Invalid refresh token')
 		}
 
 		this.assertNotRevoked(claims)
@@ -226,14 +226,14 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			if (!store.takeRefresh(claims.jti)) {
 				if (family) store.revokeFamily(family)
 
-				throw new InvalidGrantError('Refresh-токен уже использован')
+				throw new InvalidGrantError('Refresh token already used')
 			}
 		}
 
 		const now = Math.floor(Date.now() / 1000)
 
 		if (authTime !== undefined && now - authTime > REFRESH_FAMILY_TTL) {
-			throw new InvalidGrantError('Вход слишком давно, подключись заново')
+			throw new InvalidGrantError('Login is too old, connect again')
 		}
 
 		return this.issue(client.client_id, claims.sub, ownClaims(claims), family ?? randomUUID(), authTime ?? now)
@@ -242,9 +242,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const claims = await this.options.tokens.verify('access', token)
 
-		// Текст уходит в заголовок WWW-Authenticate, а кириллицу Node туда не пускает:
-		// вместо 401, по которому клиент обновляет токен, получился бы 500.
-		if (!claims) throw new InvalidTokenError('Invalid or expired token')
+		if (!claims) throw new InvalidTokenError('Invalid access token')
 
 		try {
 			this.assertNotRevoked(claims)
@@ -275,7 +273,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 		const before = this.options.store.revokedBefore(claims.sub)
 
 		if (before !== undefined && typeof claims.iat === 'number' && claims.iat * 1000 <= before) {
-			throw new InvalidGrantError('Доступ отозван')
+			throw new InvalidGrantError('Access revoked')
 		}
 	}
 

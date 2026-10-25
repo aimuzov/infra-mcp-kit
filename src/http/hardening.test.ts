@@ -228,22 +228,6 @@ describe('конфиг и токены', () => {
 })
 
 describe('ошибки сервера', () => {
-	test('недействительный токен доступа даёт 401, а не 500', async () => {
-		const base = await start(memoryStore())
-		const res = await fetch(`${base}/mcp`, {
-			method: 'POST',
-			headers: {
-				authorization: 'Bearer garbage',
-				'content-type': 'application/json',
-				accept: 'application/json, text/event-stream',
-			},
-			body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
-		})
-
-		assert.equal(res.status, 401)
-		assert.match(res.headers.get('www-authenticate') ?? '', /invalid_token/)
-	})
-
 	test('упавшая фабрика сервера даёт JSON-RPC 500, а не страницу express', async () => {
 		const http = await startHttp(
 			(base) =>

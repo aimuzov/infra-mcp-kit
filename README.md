@@ -102,6 +102,14 @@ jobs:
 
 With `astro.config.mjs` in the repository the action also runs `astro check` and `svelte-check`.
 
+Optional inputs of the action:
+
+- `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
+- `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
+- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
+
+A server that uses `/http` adds `@types/express` to its devDependencies: the kit's types refer to it, while an install without dev dependencies doesn't need it. The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+
 ## Migrating from 1.x
 
 2.0 drops the HTML that the server rendered on request: every page is built by Astro.

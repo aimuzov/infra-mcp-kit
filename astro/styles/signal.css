@@ -97,6 +97,25 @@ body,
 	-webkit-font-smoothing: antialiased;
 }
 
+/*
+ * Под clip-path Chrome перерисовывает копию на каждом кадре радиуса. Сканлайны на весь
+ * экран и бесконечный пульс круга делали это дорогим, и наведение лагало. В круге
+ * остаются фон и свечение, а сканлайнов и пульса нет.
+ */
+.theme-peek {
+	background:
+		radial-gradient(
+			60rem 30rem at 85% -10%,
+			color-mix(in srgb, var(--signal-hue) 18%, transparent),
+			transparent 70%
+		),
+		var(--signal-bg);
+
+	&.theme-peek--open {
+		animation: none;
+	}
+}
+
 a {
 	color: var(--signal-fg);
 	text-decoration-color: var(--signal-hue);

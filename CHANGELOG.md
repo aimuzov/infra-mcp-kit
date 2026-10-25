@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.3...v2.0.0) (2026-10-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* the SSR layer `src/http/ui` is gone: `ui`, `html`, `escapeHtml`, `landing`, `Login.render` and `telegramButton` are removed, sign-in needs a static page and `createHttpApp` with `auth` needs `publicDir`. The migration steps are in the README.
+
+### Features
+
+* build the connector pages with Astro on infra-site-kit parts ([8c8edfd](https://github.com/aimuzov/infra-mcp-kit/commit/8c8edfd2a8f4598f5095453dcf9877ff297452b3))
+
 ## [1.0.3](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.2...v1.0.3) (2026-10-25)
 
 

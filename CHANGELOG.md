@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.2...v1.0.3) (2026-10-25)
+
+
+### Bug Fixes
+
+* harden the hosted connector and the core after the architecture review ([b42e809](https://github.com/aimuzov/infra-mcp-kit/commit/b42e809a064b28df006754ba44bb45720a7017fd))
+
 ## [1.0.2](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.1...v1.0.2) (2026-10-25)
 
 

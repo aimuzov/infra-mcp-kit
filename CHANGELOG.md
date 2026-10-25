@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.0...v3.0.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **ui:** name the page an MCP connector in the header ([02f0779](https://github.com/aimuzov/infra-mcp-kit/commit/02f07792cd0f37593b1d33995143dc1641b30e87))
+* **ui:** name the page an MCP connector in the header ([a8a4725](https://github.com/aimuzov/infra-mcp-kit/commit/a8a4725d7bdb6fe6f51888f50d3a6eb5e26a49cb))
+
 ## [3.0.0](https://github.com/aimuzov/infra-mcp-kit/compare/v2.1.0...v3.0.0) (2026-10-25)
 
 

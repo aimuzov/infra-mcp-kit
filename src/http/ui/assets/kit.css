@@ -452,6 +452,24 @@ input:focus {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;
 }
+input[type='file'] {
+	font: 14px/1.2 var(--mono);
+	color: var(--muted);
+	max-width: 100%;
+}
+input[type='file']::file-selector-button {
+	font: 500 14px/1 var(--mono);
+	padding: 10px 14px;
+	margin-right: 12px;
+	border-radius: 8px;
+	border: 1px solid var(--line);
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+input[type='file']::file-selector-button:hover {
+	border-color: var(--accent);
+}
 .check {
 	display: flex;
 	gap: 10px;

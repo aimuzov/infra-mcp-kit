@@ -188,7 +188,11 @@ export async function oauthFlow({
 			fetch(`${base}/token`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/x-www-form-urlencoded' },
-				body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }),
+				body: new URLSearchParams({
+					grant_type: 'refresh_token',
+					refresh_token: refreshToken,
+					client_id: clientId,
+				}),
 			}),
 	}
 }

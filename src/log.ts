@@ -61,12 +61,26 @@ export function parseLogLevel(value: string | undefined): LogLevel | undefined {
 	return name && Object.hasOwn(ORDER, name) ? (name as LogLevel) : undefined
 }
 
-const envLevel = process.env.LOG_LEVEL
+let shared: Logger | undefined
+
+// Окружение читается при первой записи, а не при импорте: `.env` сервер подхватывает
+// уже после того, как кит загружен, и уровень из него иначе бы не сработал.
+function current(): Logger {
+	if (shared) return shared
+
+	const raw = process.env.LOG_LEVEL
+
+	shared = createLogger({ level: parseLogLevel(raw) ?? 'info', file: process.env.LOG_FILE || undefined })
+
+	if (raw?.trim() && !parseLogLevel(raw)) shared.warn(`LOG_LEVEL "${raw}" is unknown, using info`)
+
+	return shared
+}
 
 /** Общий логгер процесса. Уровень и файл из `LOG_LEVEL` и `LOG_FILE`. */
-export const log = createLogger({
-	level: parseLogLevel(envLevel) ?? 'info',
-	file: process.env.LOG_FILE || undefined,
-})
-
-if (envLevel?.trim() && !parseLogLevel(envLevel)) log.warn(`LOG_LEVEL "${envLevel}" is unknown, using info`)
+export const log: Logger = {
+	error: (message, meta) => current().error(message, meta),
+	warn: (message, meta) => current().warn(message, meta),
+	info: (message, meta) => current().info(message, meta),
+	debug: (message, meta) => current().debug(message, meta),
+}

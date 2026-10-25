@@ -4,36 +4,112 @@
 </p>
 
 <p align="center">
+	<img src=".github/assets/banner.en.jpg" alt="infra-mcp-kit: shared ground for MCP servers" width="100%">
+</p>
+
+<p align="center">
 	<a href="https://github.com/aimuzov/infra-mcp-kit/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/aimuzov/infra-mcp-kit/check.yml?branch=main&label=check" alt="Check"></a>
-	<a href="https://www.npmjs.com/package/@aimuzov/infra-mcp-kit"><img src="https://img.shields.io/npm/v/@aimuzov/infra-mcp-kit?label=npm" alt="npm"></a>
+	<a href="https://github.com/aimuzov/infra-mcp-kit/releases"><img src="https://img.shields.io/github/v/release/aimuzov/infra-mcp-kit?sort=semver&label=version" alt="Version"></a>
 	<a href="package.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Faimuzov%2Finfra-mcp-kit%2Fmain%2Fpackage.json&query=%24.engines.node&label=node&logo=nodedotjs&logoColor=white&color=5fa04e" alt="Node"></a>
+	<a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-kit-8b5cf6" alt="MCP"></a>
 	<a href="LICENSE"><img src="https://img.shields.io/github/license/aimuzov/infra-mcp-kit" alt="License"></a>
 </p>
 
 <h3 align="center">One base for every aimuzov MCP server</h3>
-<p align="center">stdio core, hosted OAuth connector, Astro pages and test helpers</p>
+<p align="center">stdio core, hosted OAuth connector, connector pages and test helpers</p>
 
-Shared parts of the aimuzov MCP servers. A fix to OAuth or to the look of the connector pages lands here once instead of in every server.
+Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://github.com/aimuzov/infra-mcp-template). A fix to OAuth, to the CLI or to the look of the connector pages lands here once instead of in every server.
 
-The package is built from TypeScript and published to npm: the servers themselves are installed with `npx` and cannot pull a dependency from GitHub.
+## What's inside
 
-## What is inside
+- [**Core**](#core): `runCli`, `serveStdio`, tool results, env helpers, `dataDir`, a stderr logger and `readVersion`.
+- [**HTTP and OAuth**](#http-and-oauth): a stateless `/mcp` over Streamable HTTP, an OAuth server with single-use codes and rotating refresh tokens, Telegram and token-form sign-in, a JSON API for the account page.
+- [**Pages**](#pages): the `mcpPages()` Astro integration with the landing, sign-in, error and 404 pages in the "Signal" style.
+- [**Testing**](#testing): in-memory and HTTP clients and the whole OAuth flow for `node --test`.
+- [**Actions**](#actions) `check` and `publish` for the server workflows.
+- [**Migrating from 1.x**](#migrating-from-1x).
 
-- `@aimuzov/infra-mcp-kit`: `runCli` (stdio by default, `serve --http`, `--help`, subcommands), `serveStdio`, tool results `text`, `json`, `failure` and the `tool` wrapper, env helpers, `dataDir`, a stderr logger and `readVersion`.
-- `@aimuzov/infra-mcp-kit/http`: `createHttpApp` and `serveHttp` with stateless `/mcp` over Streamable HTTP, OAuth on the SDK router, `/health` and the pages built by `/astro`, served from `publicDir`. Sign-in is a static page plus a `complete` hook that tells who came back; ready ones are `telegramLogin` and `tokenFormLogin`. Codes live in `memoryStore` or `sqliteStore` and work exactly once; tokens are signed or, when a third-party API key rides in the claims, encrypted. `apiError`, `sendJson`, `requireSession` and `errorPage` serve the JSON API behind the account page.
-- `@aimuzov/infra-mcp-kit/astro`: the `mcpPages()` Astro integration with the landing, sign-in (token form and Telegram), error and 404 pages, the layout and the Svelte islands for a service's own pages, such as `AccountShell`.
-- `@aimuzov/infra-mcp-kit/testing`: `connectInMemory`, `expectTools`, `startHttp`, `oauthFlow` with `submitForm`, `telegramSigned` and `devLink`, `fakePages` and `connectHttp` for `node --test`.
-- Actions `check` and `publish` for the server workflows.
+## Install
+
+```bash
+npm install -E github:aimuzov/infra-mcp-kit#v2.0.0
+```
+
+npm builds the package on install, `prepare` runs `tsc`. The `@modelcontextprotocol/sdk` peer stays in the server. Publishing to npm is ready but off until the repo variable `NPM_PUBLISH` is set.
+
+## Core
+
+```ts
+import { readVersion, runCli } from '@aimuzov/infra-mcp-kit'
+
+await runCli({
+	name: 'example',
+	version: readVersion(import.meta.url),
+	usage: 'example: MCP server\n\nUsage: example [serve [--http] | --help | --version]',
+	stdio: () => createServer(),
+	http: () => import('./http.ts').then((m) => m.serve()),
+	commands: { sync: (args) => sync(args) },
+})
+```
+
+- `runCli` handles `--help`, `--version`, `serve` (stdio, also with no arguments), `serve --http` and the service's own `commands`. An unknown command prints the usage and exits with 2, any error is one line `name: message` and exit 1; the stack is printed with `LOG_LEVEL=debug`.
+- `serveStdio(server, name)` connects a server to stdio.
+- `text`, `json` (plain objects also go to `structuredContent`) and `failure` build tool results. `tool(handler)` wraps a handler: a string becomes text, an object becomes JSON, a thrown error becomes `failure` and a log line.
+- `str`, `required`, `int`, `bool` and `list` read env strictly: a typo in a number or a flag stops the start with the variable's name. `loadEnvFile()` reads `.env` without overriding what is set.
+- `dataDir(name)` is `<NAME>_DATA_DIR`, then `$XDG_CONFIG_HOME/<name>`, then `~/.config/<name>`.
+- `log` writes to stderr only, stdout belongs to the protocol. `LOG_LEVEL` is `error`, `warn`, `info` (default) or `debug`, `LOG_FILE` adds a file.
+- `readVersion(import.meta.url)` finds the nearest `package.json`, so the MCP handshake never lags behind the release.
+
+## HTTP and OAuth
+
+```ts
+import { loadHttpConfig, serveHttp, sqliteStore, tokenFormLogin } from '@aimuzov/infra-mcp-kit/http'
+
+await serveHttp({
+	config: loadHttpConfig(),
+	service: { name: 'example' },
+	publicDir: new URL('../build/public', import.meta.url).pathname,
+	createServer: (auth) => createServer(auth?.extra),
+	auth: {
+		store: sqliteStore(`${dataDir('example')}/auth.db`),
+		tokens: 'encrypt',
+		login: tokenFormLogin({ fields: [{ name: 'token', label: 'API token' }], verify }),
+	},
+})
+```
+
+`createHttpApp` gives an express app, `serveHttp` also listens on `PORT`. Routes:
+
+- `POST /mcp` builds a new server and transport for every request. With `auth` it wants a Bearer token, other methods get 405.
+- `GET /health` answers `{ "ok": true }`.
+- OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` and `/authorize/callback`.
+- The pages from `publicDir`, `/x` serves `x.html`. A browser gets `404.html` for an unknown route and the `/error` page for a failure, `fetch` gets JSON.
+- `routes(app, context)` adds the service's own API.
+
+`loadHttpConfig()` reads `PUBLIC_URL` (an origin, https outside loopback), `AUTH_SECRET` (at least 32 characters, `openssl rand -base64 48`), `PORT` (8080) and `ALLOWED_REDIRECT_URIS`. Claude's callbacks and loopback addresses are always allowed, the list adds to them.
+
+OAuth rules:
+
+- A client registers with at most 10 redirect URIs, each one checked.
+- An authorization code lives 5 minutes, works once and only for its client.
+- Access tokens live an hour. A refresh token lives 30 days and works once: the exchange gives a new one of the same family, and replaying a spent one revokes the family. A family lives at most 90 days from sign-in.
+- `tokens: 'sign'` gives HS256 JWTs, `'encrypt'` gives JWEs. A sign-in that carries a third-party secret, like the token form, requires `encrypt`, so the secret is never readable from the token.
+- `memoryStore()` keeps clients and codes in memory, `sqliteStore(path)` in `node:sqlite`, so a deploy does not log anyone out. `store.revokeSubject(sub)` revokes everything issued to a person.
+
+Sign-in is a static page plus a `complete(req)` hook that tells who came back:
+
+- `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
+- `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
+
+The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
+
+For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession` answers 401 without it, `sameOrigin` answers 403 to a foreign `Origin`, `sendJson` and `apiError` reply in one shape.
 
 ## Pages
 
-The connector pages are static: Astro builds them into `build/public` with the server's `npm run build`, the server only serves files and keeps OAuth, `/mcp`, `/health` and a small JSON API. Whatever depends on the person, the sign-in context or the account data, is drawn by Svelte islands in the browser.
+The connector pages are static: Astro builds them into `build/public` with the server's `npm run build`, the server only serves files. Whatever depends on the person, the sign-in context or the account data, is drawn by Svelte islands in the browser.
 
-They are built from the parts of [infra-site-kit](https://github.com/aimuzov/infra-site-kit), like the sites: the author credit, the theme switch with the peek circle, the base root styles, the 404 page and the UI components (card, button, field, alert, skeleton, dropzone). The "Signal" theme only maps their `--ui-*` and `--credit-*` tokens onto its palette and styles the page layout. A service brings its accent color.
-
-The sign-in context (the signed authorization request, the client and the error of the previous attempt) travels in the URL fragment, so it reaches neither the server logs nor the proxy.
-
-`astro.config.mjs` of a server:
+They are built from [infra-site-kit](https://github.com/aimuzov/infra-site-kit), like the sites: the author credit, the theme switch with the peek circle, the base styles, the 404 page and the UI components. The "Signal" theme maps their tokens onto its palette, a service brings its accent color.
 
 ```js
 import mcpPages from '@aimuzov/infra-mcp-kit/astro'
@@ -49,7 +125,8 @@ export default defineConfig({
 			service: {
 				name: 'example',
 				repo: 'https://github.com/aimuzov/example',
-				tagline: 'What the connector does',
+				tagline: 'What it does',
+				tools: ['search'],
 			},
 			tokenForm: { title: 'Connect example', fields: [{ name: 'token', label: 'API token', type: 'password' }] },
 		}),
@@ -57,37 +134,39 @@ export default defineConfig({
 })
 ```
 
-The pages are compiled by the server, so these stay its dev dependencies and never reach the runtime or `npx`: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit`, `@lucide/svelte` and `postcss-nested`. Like the sites, the server keeps `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`: the site-kit components need both. [`e2e/connector`](e2e/connector) is a working example.
+- `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm` and `/login/telegram` with `telegram: { botName, grants }`. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
+- The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
+- A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
+- Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`.
 
-## Usage
+[`e2e/connector`](e2e/connector) is a working example.
 
-```bash
-npm install -E @aimuzov/infra-mcp-kit
-```
+## Testing
 
 ```ts
-import { readVersion, runCli } from '@aimuzov/infra-mcp-kit'
-import { loadHttpConfig, serveHttp, sqliteStore, tokenFormLogin } from '@aimuzov/infra-mcp-kit/http'
+import {
+	connectInMemory,
+	expectTools,
+	fakePages,
+	oauthFlow,
+	startHttp,
+	submitForm,
+} from '@aimuzov/infra-mcp-kit/testing'
 
-await runCli({
-	name: 'example',
-	version: readVersion(import.meta.url),
-	usage: 'example: MCP server',
-	stdio: () => createServer(),
-	http: () =>
-		serveHttp({
-			config: loadHttpConfig(),
-			service: { name: 'example' },
-			publicDir: new URL('../build/public', import.meta.url).pathname,
-			createServer: (auth) => createServer(auth?.extra),
-			auth: {
-				store: sqliteStore('/data/auth.db'),
-				tokens: 'encrypt',
-				login: tokenFormLogin({ fields: [{ name: 'token', label: 'API token' }], verify }),
-			},
-		}),
-})
+const client = await connectInMemory(createServer())
+
+await expectTools(client, ['search'])
+
+const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }).app)
+const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ token: 'good' }) })
 ```
+
+- `connectInMemory` and `connectHttp` give an SDK client. `expectTools` compares the tool list, `textOf` joins a text result.
+- `startHttp` listens on a random port of 127.0.0.1.
+- `oauthFlow` runs register, authorize, sign-in, callback and the code exchange. `submitForm`, `telegramSigned` and `devLink` cover the ready sign-ins, `exchangeAgain` and `refresh` check single use.
+- `fakePages()` gives a `publicDir` without building Astro.
+
+## Actions
 
 `.github/workflows/check.yml` of a server:
 
@@ -95,12 +174,21 @@ await runCli({
 jobs:
     check:
         runs-on: ubuntu-latest
-        timeout-minutes: 10
+        timeout-minutes: 15
         steps:
             - uses: aimuzov/infra-mcp-kit/check@v2
+              with:
+                  docker: deploy/Dockerfile
 ```
 
-With `astro.config.mjs` in the repository the action also runs `astro check` and `svelte-check`.
+- `check`: `npm ci`, Prettier, oxlint, types, `astro check` and `svelte-check` when `astro.config.mjs` exists, `node --test`, the build and `smoke` (`node build/index.js --help`). Then it packs the server, installs the tarball without dev dependencies, as `npx` would, and runs its `--help`. With `docker` it also builds the image. Ubuntu packages go in `apt-packages`.
+- `publish`: `npm publish --provenance` of a release tag, by `npm-token` or by trusted publishing.
+
+Both are composite actions: the job stays in the server, so the required `check` status keeps its name.
+
+## Releases
+
+release-please through [aimuzov/.github](https://github.com/aimuzov/.github) keeps a release PR. Merging it cuts a release, the checks run again and the `v2` major tag moves to it, so `check@v2` follows patches.
 
 Optional inputs of the action:
 
@@ -114,10 +202,10 @@ A server that uses `/http` adds `@types/express` to its devDependencies: the kit
 
 2.0 drops the HTML that the server rendered on request: every page is built by Astro.
 
-1. Add the pages: the dev dependencies above, `astro.config.mjs` with `mcpPages()`, `svelte.config.js` and `postcss.config.mjs`. `npm run build` becomes `tsc` followed by `astro build`, and `files` of `package.json` keeps `build`, so `npx` gets `build/public` too.
-2. Pass `publicDir` to `createHttpApp` or `serveHttp`. With `auth` it is required: sign-in is a static page now. `landing` is gone, the landing comes from `mcpPages({ service })`. `service` is only `{ name }`, its `repo`, `accent` and texts moved to `mcpPages`.
-3. Sign-in: `telegramLogin` drops `botName` and `grants`, `tokenFormLogin` drops `title`, `lead` and `submit`, they live in `mcpPages({ telegram, tokenForm })`. A custom `Login` replaces `render` with `page`, the path of its static page, and may add `context` to the fragment. `LoginPageContext`, `KitOAuthProvider.renderLogin` and `telegramButton` are gone.
-4. The `ui` namespace, `html`, `raw`, `escapeHtml`, `SafeHtml` and the `/_kit/*` assets are gone. An account page is a page of the service: `src/frontend/pages/account.astro` on the kit layout with an island wrapped in `AccountShell`, which loads `/account/state` and shows sign-in on 401. The server answers that route with `requireSession` and `sendJson`.
-5. Errors: the OAuth callback redirects to the static `/error` page instead of rendering one, unknown routes get `404.html` for a browser and a JSON error for `fetch`, `sameOrigin` answers 403 with a JSON error.
-6. Tests: `/authorize` answers 302 to the sign-in page. `oauthFlow` passes the `login` callback the parsed `LoginStep` instead of the page HTML; `submitForm`, `telegramSigned` and `devLink` cover the ready sign-ins, and `fakePages()` gives a `publicDir` without building Astro. `callbackFrom` and `hiddenField` are gone.
+1. Add the pages: the dev dependencies above, `astro.config.mjs` with `mcpPages()`, `svelte.config.js` and `postcss.config.mjs`. `npm run build` becomes `tsc` followed by `astro build`.
+2. Pass `publicDir` to `createHttpApp` or `serveHttp`, with `auth` it is required. `landing` is gone, `service` is only `{ name }`: the repo, accent and texts moved to `mcpPages`.
+3. `telegramLogin` drops `botName` and `grants`, `tokenFormLogin` drops `title`, `lead` and `submit`: they live in `mcpPages`. A custom `Login` replaces `render` with `page`, the path of its static page.
+4. `ui`, `html`, `raw`, `escapeHtml`, `SafeHtml` and the `/_kit/*` assets are gone. An account page is a page of the service with an island in `AccountShell`, served by `requireSession` and `sendJson`.
+5. Errors redirect to the static `/error` page, unknown routes get `404.html` or JSON.
+6. Tests: `/authorize` answers 302 to the sign-in page, `oauthFlow` passes the `login` callback a `LoginStep` instead of HTML. `callbackFrom` and `hiddenField` are gone.
 7. CI: `aimuzov/infra-mcp-kit/check@v2`.

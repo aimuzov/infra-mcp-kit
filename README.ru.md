@@ -4,44 +4,194 @@
 </p>
 
 <p align="center">
+	<img src=".github/assets/banner.jpg" alt="infra-mcp-kit: общая основа MCP-серверов" width="100%">
+</p>
+
+<p align="center">
 	<a href="https://github.com/aimuzov/infra-mcp-kit/actions/workflows/check.yml"><img src="https://img.shields.io/github/actions/workflow/status/aimuzov/infra-mcp-kit/check.yml?branch=main&label=check" alt="Check"></a>
-	<a href="https://www.npmjs.com/package/@aimuzov/infra-mcp-kit"><img src="https://img.shields.io/npm/v/@aimuzov/infra-mcp-kit?label=npm" alt="npm"></a>
+	<a href="https://github.com/aimuzov/infra-mcp-kit/releases"><img src="https://img.shields.io/github/v/release/aimuzov/infra-mcp-kit?sort=semver&label=version" alt="Version"></a>
 	<a href="package.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Faimuzov%2Finfra-mcp-kit%2Fmain%2Fpackage.json&query=%24.engines.node&label=node&logo=nodedotjs&logoColor=white&color=5fa04e" alt="Node"></a>
+	<a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-kit-8b5cf6" alt="MCP"></a>
 	<a href="LICENSE"><img src="https://img.shields.io/github/license/aimuzov/infra-mcp-kit" alt="License"></a>
 </p>
 
-<h3 align="center">Общая основа MCP-серверов aimuzov</h3>
-<p align="center">Ядро для stdio, удалённый коннектор с OAuth, страницы на Astro и помощники для тестов</p>
+<h3 align="center">Одна основа для всех MCP-серверов aimuzov</h3>
+<p align="center">Ядро на stdio, размещённый OAuth-коннектор, страницы коннектора и хелперы для тестов</p>
 
-Общие части MCP-серверов aimuzov. Исправление в OAuth или во внешнем виде страниц коннектора делается здесь один раз, а не в каждом сервере.
-
-Пакет собирается из TypeScript и публикуется в npm: сами серверы ставятся через `npx` и тащить зависимость с GitHub не могут.
+Общие части MCP-серверов aimuzov, собранных из [infra-mcp-template](https://github.com/aimuzov/infra-mcp-template). Правка OAuth, CLI или внешнего вида страниц коннектора попадает сюда один раз, а не в каждый сервер.
 
 ## Что внутри
 
-- `@aimuzov/infra-mcp-kit`: `runCli` (stdio по умолчанию, `serve --http`, `--help`, свои подкоманды), `serveStdio`, ответы инструментов `text`, `json`, `failure` и обёртка `tool`, хелперы окружения, `dataDir`, логгер в stderr и `readVersion`.
-- `@aimuzov/infra-mcp-kit/http`: `createHttpApp` и `serveHttp` со `/mcp` без состояния по Streamable HTTP, OAuth на роутере SDK, `/health` и страницы из `publicDir`, собранные `/astro`. Вход -- статическая страница и хук `complete`, который по возвращению человека говорит, кто это; готовые входы: `telegramLogin` и `tokenFormLogin`. Коды лежат в `memoryStore` или `sqliteStore` и срабатывают ровно один раз; токены подписаны, а если в claims едет чужой API-ключ, зашифрованы. `apiError`, `sendJson`, `requireSession` и `errorPage` -- для JSON-API за кабинетом.
-- `@aimuzov/infra-mcp-kit/astro`: интеграция `mcpPages()` для Astro с лендингом, входом (токен-форма и Telegram), страницами ошибки и 404, layout и Svelte-островами для своих страниц сервиса, например `AccountShell`.
-- `@aimuzov/infra-mcp-kit/testing`: `connectInMemory`, `expectTools`, `startHttp`, `oauthFlow` с `submitForm`, `telegramSigned` и `devLink`, `fakePages` и `connectHttp` для `node --test`.
-- Actions `check` и `publish` для workflow серверов.
+- [**Ядро**](#ядро): `runCli`, `serveStdio`, результаты инструментов, хелперы окружения, `dataDir`, логгер в stderr и `readVersion`.
+- [**HTTP и OAuth**](#http-и-oauth): `/mcp` без состояния поверх Streamable HTTP, OAuth-сервер с одноразовыми кодами и ротацией refresh-токенов, вход через Telegram и форму токена, JSON-API для кабинета.
+- [**Страницы**](#страницы): Astro-интеграция `mcpPages()` с лендингом, входом, страницами ошибки и 404 в стиле «Сигнал».
+- [**Тесты**](#тесты): клиенты в памяти и по HTTP и весь OAuth-поток для `node --test`.
+- [**Actions**](#actions) `check` и `publish` для workflow серверов.
+- [**Переезд с 1.x**](#переезд-с-1x).
+
+## Установка
+
+```bash
+npm install -E github:aimuzov/infra-mcp-kit#v2.0.0
+```
+
+npm собирает пакет при установке, `prepare` запускает `tsc`. Peer-зависимость `@modelcontextprotocol/sdk` остаётся в сервере. Публикация в npm готова, но выключена, пока в репо не задана переменная `NPM_PUBLISH`.
+
+## Ядро
+
+```ts
+import { readVersion, runCli } from '@aimuzov/infra-mcp-kit'
+
+await runCli({
+	name: 'example',
+	version: readVersion(import.meta.url),
+	usage: 'example: MCP server\n\nUsage: example [serve [--http] | --help | --version]',
+	stdio: () => createServer(),
+	http: () => import('./http.ts').then((m) => m.serve()),
+	commands: { sync: (args) => sync(args) },
+})
+```
+
+- `runCli` обрабатывает `--help`, `--version`, `serve` (stdio, и без аргументов тоже), `serve --http` и собственные `commands` сервиса. Неизвестная команда печатает usage и выходит с кодом 2, любая ошибка печатается одной строкой `name: message` с кодом 1, стек — при `LOG_LEVEL=debug`.
+- `serveStdio(server, name)` подключает сервер к stdio.
+- `text`, `json` (обычный объект попадает и в `structuredContent`) и `failure` собирают результат инструмента. `tool(handler)` оборачивает обработчик: строка становится текстом, объект — JSON, брошенная ошибка — `failure` и строкой в логе.
+- `str`, `required`, `int`, `bool` и `list` читают окружение строго: опечатка в числе или флаге останавливает запуск с именем переменной. `loadEnvFile()` читает `.env`, не перезаписывая то, что уже задано.
+- `dataDir(name)` — это `<NAME>_DATA_DIR`, затем `$XDG_CONFIG_HOME/<name>`, затем `~/.config/<name>`.
+- `log` пишет только в stderr: stdout принадлежит протоколу. `LOG_LEVEL` — `error`, `warn`, `info` (по умолчанию) или `debug`, `LOG_FILE` добавляет файл.
+- `readVersion(import.meta.url)` находит ближайший `package.json`, поэтому рукопожатие MCP не отстаёт от релиза.
+
+## HTTP и OAuth
+
+```ts
+import { loadHttpConfig, serveHttp, sqliteStore, tokenFormLogin } from '@aimuzov/infra-mcp-kit/http'
+
+await serveHttp({
+	config: loadHttpConfig(),
+	service: { name: 'example' },
+	publicDir: new URL('../build/public', import.meta.url).pathname,
+	createServer: (auth) => createServer(auth?.extra),
+	auth: {
+		store: sqliteStore(`${dataDir('example')}/auth.db`),
+		tokens: 'encrypt',
+		login: tokenFormLogin({ fields: [{ name: 'token', label: 'API-токен' }], verify }),
+	},
+})
+```
+
+`createHttpApp` отдаёт приложение express, `serveHttp` ещё и слушает `PORT`. Маршруты:
+
+- `POST /mcp` создаёт новый сервер и транспорт на каждый запрос. С `auth` требует Bearer-токен, другие методы получают 405.
+- `GET /health` отвечает `{ "ok": true }`.
+- OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` и `/authorize/callback`.
+- Страницы из `publicDir`, `/x` отдаёт `x.html`. Браузер на неизвестный адрес получает `404.html`, при сбое — страницу `/error`, `fetch` получает JSON.
+- `routes(app, context)` добавляет собственное API сервиса.
+
+`loadHttpConfig()` читает `PUBLIC_URL` (origin, https везде, кроме loopback), `AUTH_SECRET` (от 32 символов, `openssl rand -base64 48`), `PORT` (8080) и `ALLOWED_REDIRECT_URIS`. Колбэки Claude и loopback-адреса разрешены всегда, список добавляется к ним.
+
+Правила OAuth:
+
+- Клиент регистрируется максимум с 10 redirect URI, каждый проверяется.
+- Код авторизации живёт 5 минут, работает один раз и только для своего клиента.
+- Access-токен живёт час. Refresh-токен живёт 30 дней и работает один раз: обмен выдаёт новый токен той же цепочки, а повтор уже потраченного отзывает всю цепочку. Цепочка живёт не дольше 90 дней от входа.
+- `tokens: 'sign'` выдаёт JWT HS256, `'encrypt'` — JWE. Вход, который несёт чужой секрет, как форма токена, требует `encrypt`: из токена секрет не прочитать.
+- `memoryStore()` держит клиентов и коды в памяти, `sqliteStore(path)` — в `node:sqlite`, поэтому деплой никого не разлогинивает. `store.revokeSubject(sub)` отзывает всё, что выдано человеку.
+
+Вход — это статическая страница и хук `complete(req)`, который говорит, кто вернулся:
+
+- `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
+- `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
+
+Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
+
+Для кабинета: `sessions(tokens, publicUrl)` даёт подписанную httpOnly-куку, `requireSession` без неё отвечает 401, `sameOrigin` отвечает 403 на чужой `Origin`, `sendJson` и `apiError` отвечают в одном формате.
 
 ## Страницы
 
-Страницы коннектора статические: Astro собирает их в `build/public` при `npm run build` сервера, а сервер только раздаёт файлы и держит OAuth, `/mcp`, `/health` и небольшое JSON-API. Всё, что зависит от человека, контекст входа и данные кабинета, дорисовывают Svelte-острова в браузере.
+Страницы коннектора статические: Astro собирает их в `build/public` при `npm run build` сервера, сервер только отдаёт файлы. Всё, что зависит от человека, — контекст входа или данные кабинета — дорисовывают Svelte-острова в браузере.
 
-Собраны они из частей [infra-site-kit](https://github.com/aimuzov/infra-site-kit), как у сайтов: подпись автора, переключатель темы с кругом подглядывания, базовые стили корня, страница 404 и компоненты (карточка, кнопка, поле, предупреждение, скелетон, дропзона). Тема "Сигнал" только переназначает их токены `--ui-*` и `--credit-*` на свою палитру и оформляет раскладку страниц. От сервиса -- только его цвет.
+Они собраны из [infra-site-kit](https://github.com/aimuzov/infra-site-kit), как и сайты: строка автора, переключатель темы с кругом подсмотра, базовые стили, страница 404 и UI-компоненты. Тема «Сигнал» переносит их токены на свою палитру, сервис приносит свой акцентный цвет.
 
-Контекст входа (подписанный запрос авторизации, клиент и ошибка прошлой попытки) едет во фрагменте адреса, поэтому не попадает ни в логи сервера, ни в прокси.
+```js
+import mcpPages from '@aimuzov/infra-mcp-kit/astro'
+import svelte from '@astrojs/svelte'
+import { defineConfig } from 'astro/config'
 
-Страницы собирает сервер, поэтому всё нужное для этого остаётся в его devDependencies и не попадает в рантайм и `npx`: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit`, `@lucide/svelte` и `postcss-nested`. Как у сайтов, у сервера лежат `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`: без них компоненты site-kit не собираются. Рабочий пример -- [`e2e/connector`](e2e/connector), конфиг и точка входа -- в [README.md](README.md#pages).
-
-## Подключение
-
-```bash
-npm install -E @aimuzov/infra-mcp-kit
+export default defineConfig({
+	srcDir: './src/frontend',
+	outDir: './build/public',
+	integrations: [
+		svelte(),
+		mcpPages({
+			service: {
+				name: 'example',
+				repo: 'https://github.com/aimuzov/example',
+				tagline: 'Что он делает',
+				tools: ['search'],
+			},
+			tokenForm: {
+				title: 'Подключение example',
+				fields: [{ name: 'token', label: 'API-токен', type: 'password' }],
+			},
+		}),
+	],
+})
 ```
 
-Workflow проверки сервера -- `aimuzov/infra-mcp-kit/check@v2`. Если в репозитории есть `astro.config.mjs`, action гоняет ещё `astro check` и `svelte-check`.
+- `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
+- У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
+- Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
+
+Рабочий пример — [`e2e/connector`](e2e/connector).
+
+## Тесты
+
+```ts
+import {
+	connectInMemory,
+	expectTools,
+	fakePages,
+	oauthFlow,
+	startHttp,
+	submitForm,
+} from '@aimuzov/infra-mcp-kit/testing'
+
+const client = await connectInMemory(createServer())
+
+await expectTools(client, ['search'])
+
+const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }).app)
+const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ token: 'good' }) })
+```
+
+- `connectInMemory` и `connectHttp` дают клиента SDK. `expectTools` сверяет список инструментов, `textOf` склеивает текстовый ответ.
+- `startHttp` слушает случайный порт на 127.0.0.1.
+- `oauthFlow` проходит регистрацию, авторизацию, вход, колбэк и обмен кода. `submitForm`, `telegramSigned` и `devLink` покрывают готовые способы входа, `exchangeAgain` и `refresh` проверяют одноразовость.
+- `fakePages()` даёт `publicDir` без сборки Astro.
+
+## Actions
+
+`.github/workflows/check.yml` сервера:
+
+```yaml
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: aimuzov/infra-mcp-kit/check@v2
+              with:
+                  docker: deploy/Dockerfile
+```
+
+- `check`: `npm ci`, Prettier, oxlint, типы, `astro check` и `svelte-check` при наличии `astro.config.mjs`, `node --test`, сборка и `smoke` (`node build/index.js --help`). Потом упаковывает сервер, ставит тарбол без dev-зависимостей, как это сделает `npx`, и запускает его `--help`. С `docker` ещё и собирает образ. Пакеты Ubuntu передаются в `apt-packages`.
+- `publish`: `npm publish --provenance` релизного тега, по `npm-token` или через trusted publishing.
+
+Это composite actions: job остаётся в сервере, поэтому обязательная проверка `check` не меняет имени.
+
+## Релизы
+
+release-please через [aimuzov/.github](https://github.com/aimuzov/.github) ведёт релизный PR. Его мёрж выпускает релиз, проверки проходят ещё раз, и мажорный тег `v2` переезжает на него, поэтому `check@v2` подхватывает патчи.
 
 Необязательные входы action:
 
@@ -53,12 +203,12 @@ Workflow проверки сервера -- `aimuzov/infra-mcp-kit/check@v2`. Е
 
 ## Переезд с 1.x
 
-В 2.0 сервер больше не рисует HTML на запрос: все страницы собирает Astro.
+2.0 отказывается от HTML, который сервер рисовал на запрос: все страницы собирает Astro.
 
-1. Добавить страницы: devDependencies выше, `astro.config.mjs` с `mcpPages()`, `svelte.config.js` и `postcss.config.mjs`. `npm run build` -- это `tsc`, затем `astro build`, а в `files` у `package.json` остаётся `build`, поэтому `npx` получает и `build/public`.
-2. Передать `publicDir` в `createHttpApp` или `serveHttp`. С `auth` он обязателен: вход теперь статическая страница. `landing` больше нет, лендинг рисует `mcpPages({ service })`. `service` у сервера -- только `{ name }`, а `repo`, `accent` и тексты переехали в `mcpPages`.
-3. Вход: у `telegramLogin` нет `botName` и `grants`, у `tokenFormLogin` -- `title`, `lead` и `submit`, они живут в `mcpPages({ telegram, tokenForm })`. Свой `Login` вместо `render` задаёт `page`, путь своей статической страницы, и может дописать во фрагмент `context`. `LoginPageContext`, `KitOAuthProvider.renderLogin` и `telegramButton` удалены.
-4. Неймспейса `ui`, `html`, `raw`, `escapeHtml`, `SafeHtml` и ассетов `/_kit/*` больше нет. Кабинет -- страница самого сервиса: `src/frontend/pages/account.astro` на layout кита и остров в `AccountShell`, который грузит `/account/state` и на 401 показывает вход. Сервер отвечает на этот маршрут через `requireSession` и `sendJson`.
-5. Ошибки: колбэк OAuth редиректит на статическую `/error`, а не рисует её; на незнакомый адрес браузер получает `404.html`, а `fetch` -- JSON-ошибку; `sameOrigin` отвечает 403 JSON-ошибкой.
-6. Тесты: `/authorize` отвечает 302 на страницу входа. `oauthFlow` отдаёт колбэку `login` разобранный `LoginStep` вместо HTML страницы; готовые входы закрывают `submitForm`, `telegramSigned` и `devLink`, а `fakePages()` даёт `publicDir` без сборки Astro. `callbackFrom` и `hiddenField` удалены.
+1. Добавь страницы: dev-зависимости выше, `astro.config.mjs` с `mcpPages()`, `svelte.config.js` и `postcss.config.mjs`. `npm run build` становится `tsc` и затем `astro build`.
+2. Передай `publicDir` в `createHttpApp` или `serveHttp`, с `auth` он обязателен. `landing` убран, `service` — только `{ name }`: репозиторий, акцент и тексты переехали в `mcpPages`.
+3. У `telegramLogin` больше нет `botName` и `grants`, у `tokenFormLogin` — `title`, `lead` и `submit`: они живут в `mcpPages`. Свой `Login` заменяет `render` на `page`, путь к своей статической странице.
+4. Убраны `ui`, `html`, `raw`, `escapeHtml`, `SafeHtml` и ассеты `/_kit/*`. Кабинет — это страница сервиса с островом в `AccountShell`, который обслуживают `requireSession` и `sendJson`.
+5. Ошибки ведут редиректом на статическую `/error`, неизвестные адреса получают `404.html` или JSON.
+6. Тесты: `/authorize` отвечает 302 на страницу входа, `oauthFlow` передаёт в `login` разобранный `LoginStep` вместо HTML. `callbackFrom` и `hiddenField` убраны.
 7. CI: `aimuzov/infra-mcp-kit/check@v2`.

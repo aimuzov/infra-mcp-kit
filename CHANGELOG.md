@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/aimuzov/infra-mcp-kit/compare/v2.1.0...v3.0.0) (2026-10-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* createHttpApp returns { handle, listener, context }, routes take a Request and return a Response, the account helpers work with Request and Response, Login.complete gets { request, method, query, form }, mountOAuth is oauthRouter. See "Migrating from 2.x" in the README.
+
+### Features
+
+* move the kit to tmcp and drop express ([bcc719a](https://github.com/aimuzov/infra-mcp-kit/commit/bcc719a1f58adde22f6afc28b5a96978c16095d5))
+
 ## [2.1.0](https://github.com/aimuzov/infra-mcp-kit/compare/v2.0.0...v2.1.0) (2026-10-25)
 
 

@@ -14,9 +14,9 @@
 
 <Card>
 	<h2 class="section-title">Подключить</h2>
-	<div class="connect__url">
-		{#if url}<CopyValue value={url} label="Адрес" />{:else}<code>…/mcp</code>{/if}
-	</div>
+	<!-- CopyValue рисуем и на сборке, с заглушкой: Astro вшивает в страницу CSS только тех
+	     компонентов, что попали в статику, а стили отрисованных в браузере теряются. -->
+	<div class="connect__url"><CopyValue value={url || '…/mcp'} label="Адрес" /></div>
 	<ol class="steps">
 		<li>
 			<b>claude.ai и&nbsp;Claude Desktop</b><span

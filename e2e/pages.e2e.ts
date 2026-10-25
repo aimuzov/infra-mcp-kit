@@ -235,6 +235,28 @@ describe('острова', () => {
 
 		await context.close()
 	})
+
+	// Стили компонентов, которые появляются только в браузере, Astro в страницу не вшивает:
+	// адрес на лендинге раньше был голой системной кнопкой.
+	test('адрес на лендинге -- CopyValue со своими стилями и настоящим адресом', async () => {
+		const { page, context } = await open('/')
+		const button = page.locator('.connect__url .copy__button')
+
+		assert.equal(await button.locator('.copy__value').textContent(), new URL('/mcp', http.base).href)
+
+		const style = await button.evaluate((node) => {
+			const css = getComputedStyle(node)
+
+			return {
+				radius: css.borderTopLeftRadius,
+				font: getComputedStyle(node.querySelector('.copy__value')!).fontFamily,
+			}
+		})
+
+		assert.equal(style.radius, '6px')
+		assert.match(style.font, /mono/i)
+		await context.close()
+	})
 })
 
 describe('скриншоты', () => {

@@ -6,14 +6,15 @@
 	import AccountShell from '@aimuzov/infra-mcp-kit/astro/components/account-shell.svelte'
 
 	// Кабинет, как его собирает сервис: каркас кита и свои карточки из компонентов site-kit.
+	// Параметр сниппета не зовём `state`: рядом с рунами Svelte примет `$state` за store.
 	type State = { name: string; corpus: 'none' | 'building' | 'ready' }
 </script>
 
 <AccountShell>
-	{#snippet children(state: State, reload: () => Promise<void>)}
+	{#snippet children(data: State, reload: () => Promise<void>)}
 		<Card>
 			<h2 class="section-title">Корпус</h2>
-			<p data-corpus>{state.corpus}</p>
+			<p data-corpus>{data.corpus}</p>
 			<Dropzone onfile={() => reload()} accept=".json,application/json" title="Перетащи выгрузку сюда" />
 		</Card>
 		<Card tone="danger">

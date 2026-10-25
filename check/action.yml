@@ -18,6 +18,18 @@ inputs:
     description: Dockerfile to build, e.g. deploy/Dockerfile. The image then runs `node build/index.js --help`. Empty skips it.
     required: false
     default: ''
+  coverage-lines:
+    description: Minimum line coverage in percent, e.g. 95. Runs the `test` script with Node's test coverage; the script must start with `node`. Empty runs the tests without coverage.
+    required: false
+    default: ''
+  astro-tsconfig:
+    description: tsconfig for `astro check` and `svelte-check`, e.g. tsconfig.astro.json, when the root one is for the server. Empty uses the root one.
+    required: false
+    default: ''
+  ui:
+    description: Run `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -45,15 +57,42 @@ runs:
     # Страницы на Astro из `@aimuzov/infra-mcp-kit/astro` есть не у всех серверов:
     # у stdio-коннекторов их нет, и шаг ничего не делает.
     - shell: bash
+      env:
+        TSCONFIG: ${{ inputs.astro-tsconfig }}
       run: |
         if [[ -f astro.config.mjs ]]; then
-          npx astro check
-          npx svelte-check
+          npx astro check ${TSCONFIG:+--tsconfig "$TSCONFIG"}
+          npx svelte-check ${TSCONFIG:+--tsconfig "$TSCONFIG"}
         fi
-    - shell: bash
+    - if: inputs.coverage-lines == ''
+      shell: bash
       run: npm test
+    # `--experimental-test-coverage` не пускают ни в NODE_OPTIONS, ни после глоба тестов,
+    # поэтому флаги встают сразу за `node` в скрипте `test`.
+    - if: inputs.coverage-lines != ''
+      shell: bash
+      env:
+        LINES: ${{ inputs.coverage-lines }}
+      run: |
+        script="$(node -p "require('./package.json').scripts.test ?? ''")"
+        if [[ "$script" != node\ * ]]; then echo "coverage-lines needs a test script that starts with node: $script"; exit 1; fi
+        eval "node --experimental-test-coverage --test-coverage-lines=$LINES \
+          --test-coverage-exclude='**/*.test.ts' --test-coverage-exclude='**/*.e2e.ts' \
+          --test-coverage-exclude='**/testing/**' --test-coverage-exclude='node_modules/**' ${script#node }"
     - shell: bash
       run: npm run build
+    - if: inputs.ui == 'true'
+      id: playwright
+      shell: bash
+      run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+    - if: inputs.ui == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+    - if: inputs.ui == 'true'
+      shell: bash
+      run: npx playwright install --with-deps chromium && npm run test:ui
     - if: inputs.smoke != ''
       shell: bash
       env:

@@ -84,11 +84,9 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 						csp: {
 							algorithm: 'SHA-256',
 							scriptDirective: { resources: ["'self'"] },
-							// Компоненты site-kit (Skeleton, InfoTip) ставят размеры атрибутом `style`
-							// ещё на сборке. Это `style-src-attr`: `<style>` и скрипты идут по хешам.
-							styleDirective: {
-								resources: ["'self'", { resource: "'unsafe-inline'", kind: 'attribute' }],
-							},
+							// Атрибутов `style` в статике нет: компоненты site-kit ставят размеры
+							// в браузере через `el.style`, а `<style>` и скрипты идут по хешам.
+							styleDirective: { resources: ["'self'"] },
 							directives: [
 								"default-src 'self'",
 								"img-src 'self' data:",

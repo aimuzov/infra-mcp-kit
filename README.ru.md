@@ -43,6 +43,14 @@ npm install -E @aimuzov/infra-mcp-kit
 
 Workflow проверки сервера -- `aimuzov/infra-mcp-kit/check@v2`. Если в репозитории есть `astro.config.mjs`, action гоняет ещё `astro check` и `svelte-check`.
 
+Необязательные входы action:
+
+- `coverage-lines: 95` валит проверку при покрытии строк ниже 95%. Скрипт `test` должен начинаться с `node`: флаги покрытия action ставит сразу за ним, потому что ни в `NODE_OPTIONS`, ни после глоба тестов Node их не принимает. Тесты, `*.e2e.ts` и хелперы из `testing/` в счёт не идут.
+- `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
+- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
+
+Сервер с `/http` держит `@types/express` в devDependencies: на него ссылаются типы кита, а установке без dev-зависимостей он не нужен. Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
+
 ## Переезд с 1.x
 
 В 2.0 сервер больше не рисует HTML на запрос: все страницы собирает Astro.

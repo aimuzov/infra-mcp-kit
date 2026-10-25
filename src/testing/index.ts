@@ -108,6 +108,8 @@ export type LoginStep = {
 	host: string
 	error: string
 	dev: string
+	/** Остальные ключи фрагмента: то, что сервис положил в `Login.context`. */
+	context: Record<string, string>
 }
 
 export type OAuthFlowOptions = {
@@ -139,6 +141,9 @@ export function loginStep(location: string, base: string): LoginStep {
 
 	assert.ok(get('request'), `в адресе входа нет запроса: ${location}`)
 
+	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev'])
+	const context = Object.fromEntries([...hash].filter(([key]) => !own.has(key)))
+
 	return {
 		page: url.pathname,
 		request: get('request'),
@@ -147,6 +152,7 @@ export function loginStep(location: string, base: string): LoginStep {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
+		context,
 	}
 }
 

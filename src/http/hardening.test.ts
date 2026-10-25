@@ -10,7 +10,15 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import express, { type Request } from 'express'
 import { EncryptJWT } from 'jose'
 
-import { connectHttp, oauthFlow, signTelegramLogin, startHttp, type RunningHttp } from '#kit/testing/index'
+import {
+	connectHttp,
+	fakePages,
+	oauthFlow,
+	signTelegramLogin,
+	startHttp,
+	type LoginStep,
+	type RunningHttp,
+} from '#kit/testing/index'
 
 import { createHttpApp, listen, type HttpAppOptions } from './app.ts'
 import { loadHttpConfig } from './config.ts'
@@ -22,7 +30,8 @@ import { Tokens } from './oauth/tokens.ts'
 import { readCookie } from './session.ts'
 
 const SECRET = 'x'.repeat(32)
-const service = { name: 'test', repo: 'https://github.com/aimuzov/test' }
+const service = { name: 'test' }
+const publicDir = fakePages()
 
 const server = () => {
 	const mcp = new McpServer({ name: 'test', version: '0.0.0' })
@@ -32,13 +41,19 @@ const server = () => {
 	return mcp
 }
 
-/** Вход без страницы: кнопка ведёт прямо на колбэк, колбэк говорит, кто это. */
+/** Вход без формы: страница ведёт прямо на колбэк, колбэк говорит, кто это. */
 const instantLogin = (grant: { subject: string; claims?: Record<string, unknown> }): Login => ({
-	render: ({ callbackUrl }) => `<a href="${callbackUrl.href.replaceAll('&', '&amp;')}">go</a>`,
+	page: '/login',
 	complete: () => grant,
 })
 
-const goLogin = (_page: string, callback: URL) => fetch(callback, { redirect: 'manual' })
+const goLogin = (step: LoginStep) => {
+	const url = new URL(step.callback)
+
+	url.searchParams.set('request', step.request)
+
+	return fetch(url, { redirect: 'manual' })
+}
 
 const running: RunningHttp[] = []
 
@@ -51,6 +66,7 @@ async function start(store: AuthStore, extra: Partial<HttpAppOptions> = {}) {
 				config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
 				service,
 				createServer: server,
+				publicDir,
 				auth: { store, login: instantLogin({ subject: 'u1' }) },
 				...extra,
 			}).app,
@@ -170,11 +186,12 @@ describe('вход и регистрация', () => {
 	})
 
 	test('вход с чужим секретом не стартует без шифрования токенов', () => {
-		const login = tokenFormLogin({ title: 't', fields: [], verify: () => ({ subject: 'u' }) })
+		const login = tokenFormLogin({ fields: [], verify: () => ({ subject: 'u' }) })
 		const options = {
 			config: { port: 0, publicUrl: new URL('http://localhost'), authSecret: SECRET, allowedRedirectUris: [] },
 			service,
 			createServer: server,
+			publicDir,
 		}
 
 		assert.throws(() => createHttpApp({ ...options, auth: { store: memoryStore(), login } }), /encrypt/)
@@ -185,7 +202,7 @@ describe('вход и регистрация', () => {
 	})
 
 	test('подписанный вход Telegram годится один раз', async () => {
-		const login = telegramLogin({ botToken: '1:bot', botName: 'bot' })
+		const login = telegramLogin({ botToken: '1:bot' })
 		const query = signTelegramLogin({ id: '7', auth_date: String(Math.floor(Date.now() / 1000)) }, '1:bot')
 		const req = { query } as unknown as Request
 

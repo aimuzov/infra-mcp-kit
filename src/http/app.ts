@@ -1,17 +1,25 @@
+import { existsSync } from 'node:fs'
 import type { Server } from 'node:http'
+import { join } from 'node:path'
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express'
+import express, { type ErrorRequestHandler, type Express, type Request, type RequestHandler } from 'express'
 
 import { log as defaultLog, type Logger } from '#kit/log'
 import { messageOf } from '#kit/results'
 
 import type { HttpConfig } from './config.ts'
+import { apiError, errorPage } from './json.ts'
 import { mountOAuth, type KitOAuthProvider, type Login } from './oauth/index.ts'
 import type { AuthStore } from './oauth/store.ts'
 import { Tokens } from './oauth/tokens.ts'
-import { assets, ASSETS_PATH, CSP, failPage, landingPage, type LandingOptions, type Service } from './ui/index.ts'
+
+/** Кто отвечает: имя попадает в метаданные OAuth и в строку запуска. */
+export type Service = {
+	/** Короткое имя, например `thinks`. */
+	name: string
+}
 
 export type HttpAuthOptions = {
 	login: Login
@@ -36,30 +44,64 @@ export type HttpAppOptions = {
 	service: Service
 	/** Сервер на один запрос. `auth` есть, когда включён OAuth: в `auth.extra` claims входа и `subject`. */
 	createServer(auth: AuthInfo | undefined): McpServer | Promise<McpServer>
-	/** Без него `/mcp` открыт всем: только для серверов без чужих данных. */
+	/**
+	 * Без него `/mcp` открыт всем: только для серверов без чужих данных. Входу нужна
+	 * статическая страница, поэтому с `auth` нужен и `publicDir`.
+	 */
 	auth?: HttpAuthOptions
-	/** Лендинг на `/`. `false` -- сервис рисует `/` сам. */
-	landing?: Omit<LandingOptions, 'service' | 'mcpUrl'> | false
 	/** Свои маршруты, например кабинет. Ставятся после OAuth и `/mcp`, до 404. */
 	routes?(app: Express, context: HttpContext): void
 	/** Куда писать ошибки `/mcp` и входа. По умолчанию общий `log` кита. */
 	logger?: Logger
-}
-
-/** Заголовки для всех ответов: CSP страниц кита и запрет встраивать их во фрейм. */
-const securityHeaders: RequestHandler = (_req, res, next) => {
-	res.set({
-		'Content-Security-Policy': CSP,
-		'X-Content-Type-Options': 'nosniff',
-		'Referrer-Policy': 'strict-origin-when-cross-origin',
-	})
-
-	next()
+	/**
+	 * Каталог со страницами, которые собрал Astro через `@aimuzov/infra-mcp-kit/astro`, обычно
+	 * `build/public`. Кит раздаёт файлы как есть: лендинг, вход, ошибка и 404 берутся оттуда.
+	 */
+	publicDir?: string
 }
 
 /**
- * Удалённый коннектор на express: `/mcp` по Streamable HTTP, OAuth, лендинг, `/health`
- * и ассеты страниц.
+ * Страницы Astro в формате `file`: `/login` -> `login.html`. `express.static` с `extensions`
+ * так не умеет, когда рядом лежит каталог `login/` от `/login/telegram`: он видит каталог
+ * и уходит в редирект на `/login/` или в 404.
+ */
+function pages(root: string): RequestHandler {
+	return (req, res, next) => {
+		if (req.method !== 'GET' && req.method !== 'HEAD') return void next()
+
+		const name = req.path === '/' ? 'index' : req.path.slice(1).replace(/\/$/, '')
+
+		// Только простые имена страниц: ни точек, ни обратных слешей, ни выхода из каталога.
+		if (!/^[a-z0-9/-]+$/i.test(name) || name.includes('..')) return void next()
+
+		if (!existsSync(join(root, `${name}.html`))) return void next()
+
+		// С `root` send ищет точки только в пути внутри него, иначе каталог сервера
+		// вроде `.claude/...` отдал бы 404.
+		res.sendFile(`${name}.html`, { root })
+	}
+}
+
+/**
+ * У статики Astro своя CSP в `<meta>`, с хешами своих скриптов; заголовок с другой политикой
+ * их пересёк бы. `frame-ancestors` в `<meta>` не работает, поэтому он один идёт заголовком.
+ * Без страниц коннектор отдаёт только JSON, и ему хватает `default-src 'none'`.
+ */
+const securityHeaders =
+	(pages: boolean): RequestHandler =>
+	(_req, res, next) => {
+		res.set({
+			'Content-Security-Policy': pages ? "frame-ancestors 'none'" : "default-src 'none'; frame-ancestors 'none'",
+			'X-Content-Type-Options': 'nosniff',
+			'Referrer-Policy': 'strict-origin-when-cross-origin',
+		})
+
+		next()
+	}
+
+/**
+ * Удалённый коннектор на express: `/mcp` по Streamable HTTP, OAuth, `/health` и страницы,
+ * собранные Astro.
  *
  * Без состояния: на каждый запрос свой сервер и транспорт, поэтому клиент не привязан к процессу,
  * а перезапуск не рвёт сессии.
@@ -74,6 +116,10 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 			: new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href, mode: auth?.tokens ?? 'sign' })
 	const context: HttpContext = { config, service, mcpUrl, tokens }
 
+	if (auth && !options.publicDir) {
+		throw new Error('Вход показывает статическую страницу: с `auth` нужен `publicDir` со сборкой mcpPages')
+	}
+
 	if (auth?.login.sealsSecrets && tokens.mode !== 'encrypt') {
 		throw new Error('Вход кладёт в токены чужой секрет: нужен `tokens: "encrypt"`, иначе он поедет открытым')
 	}
@@ -81,14 +127,7 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 	// Перед нами Caddy с TLS; лимитам запросов в SDK нужен адрес клиента, а не прокси.
 	app.set('trust proxy', 1)
 	app.disable('x-powered-by')
-	app.use(securityHeaders)
-
-	for (const [name, { type, body }] of Object.entries(assets(service))) {
-		app.get(
-			`${ASSETS_PATH}/${name}`,
-			(_req, res) => void res.type(type).set('Cache-Control', 'public, max-age=3600').send(body),
-		)
-	}
+	app.use(securityHeaders(Boolean(options.publicDir)))
 
 	app.get('/health', (_req, res) => void res.json({ ok: true }))
 
@@ -96,7 +135,7 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 
 	if (auth) {
 		const mounted = mountOAuth(app, {
-			service,
+			resourceName: service.name,
 			publicUrl: config.publicUrl,
 			mcpUrl,
 			tokens,
@@ -135,18 +174,19 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 
 	app.all('/mcp', (_req, res) => void res.status(405).set('Allow', 'POST').end())
 
-	if (options.landing !== false) {
-		const page = landingPage({ service, mcpUrl: mcpUrl.href, tagline: '', ...options.landing })
-
-		app.get('/', (_req, res) => void res.type('html').send(page))
+	if (options.publicDir) {
+		app.use(pages(options.publicDir))
+		app.use(express.static(options.publicDir, { index: false, redirect: false }))
 	}
 
 	options.routes?.(app, context)
 
-	app.use((_req, res) => {
-		res.status(404)
-			.type('html')
-			.send(failPage({ service, title: 'Такой страницы нет', code: '404' }))
+	app.use((req, res) => {
+		if (options.publicDir && wantsPage(req)) {
+			return void res.status(404).sendFile('404.html', { root: options.publicDir })
+		}
+
+		apiError(res, 404, 'not_found', 'Not found')
 	})
 
 	// Без своего обработчика ошибку маршрута сервиса express отдал бы своей HTML-страницей,
@@ -158,17 +198,24 @@ export function createHttpApp(options: HttpAppOptions): { app: Express; context:
 
 		if (req.path === '/mcp') return void res.status(500).json(INTERNAL_ERROR)
 
-		res.status(500)
-			.type('html')
-			.send(
-				failPage({ service, title: 'Что-то сломалось', message: 'Попробуй ещё раз чуть позже.', code: '500' }),
+		// Человека со страницы ведём на страницу ошибки, остров или скрипт получает JSON.
+		if (options.publicDir && wantsPage(req)) {
+			return void res.redirect(
+				303,
+				errorPage({ code: '500', title: 'Что-то сломалось', message: 'Попробуй ещё раз чуть позже.' }),
 			)
+		}
+
+		apiError(res, 500, 'internal', 'Internal error')
 	}
 
 	app.use(onError)
 
 	return { app, context }
 }
+
+/** Браузер за страницей, а не `fetch` острова: он просит HTML. */
+const wantsPage = (req: Request) => req.method === 'GET' && req.accepts(['html', 'json']) === 'html'
 
 const INTERNAL_ERROR = { jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null }
 

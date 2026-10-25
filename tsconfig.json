@@ -13,5 +13,5 @@
 		"skipLibCheck": true,
 		"customConditions": ["infra-mcp-kit-source"]
 	},
-	"include": ["src"]
+	"include": ["src", "e2e/*.ts"]
 }

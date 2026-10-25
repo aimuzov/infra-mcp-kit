@@ -1,0 +1,33 @@
+---
+import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
+import config from 'virtual:infra-mcp-kit/pages'
+
+import Connect from '@aimuzov/infra-mcp-kit/astro/components/connect.svelte'
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+
+const { service } = config
+---
+
+<Layout title={service.name} screen="landing">
+	<section class="hero">
+		<p class="eyebrow">MCP-коннектор</p>
+		<h1 class="glitch" data-text={service.name}>
+			{service.name}
+		</h1>
+		{service.tagline && <p class="tagline">{service.tagline}</p>}
+		{service.lead && <p class="lead">{service.lead}</p>}
+	</section>
+	<Connect client:load name={service.name} />
+	{service.tools && service.tools.length > 0 && (
+		<Card>
+			<h2 class="section-title">Инструменты</h2>
+			<ul class="chips">
+				{service.tools.map((tool) => (
+					<li>
+						<code>{tool}</code>
+					</li>
+				))}
+			</ul>
+		</Card>
+	)}
+</Layout>

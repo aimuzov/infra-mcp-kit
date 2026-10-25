@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express'
 
 import { isLoopback } from './config.ts'
+import { apiError } from './json.ts'
 import type { TokenClaims, Tokens } from './oauth/tokens.ts'
 
 export function readCookie(req: Request, name: string): string | undefined {
@@ -51,6 +52,6 @@ export function sameOrigin(publicUrl: URL) {
 	return (req: Request, res: Response, next: NextFunction) => {
 		if (req.get('origin') === publicUrl.origin) return next()
 
-		res.status(403).send('Запрос пришёл не со страницы сервиса')
+		apiError(res, 403, 'forbidden_origin', 'Запрос пришёл не со страницы сервиса')
 	}
 }

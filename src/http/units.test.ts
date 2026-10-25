@@ -3,16 +3,16 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { callbackUrl, readLoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js'
 
 import { isAllowedRedirectUri, loadHttpConfig } from './config.ts'
+import { errorPage } from './json.ts'
 import { signTelegramLogin, verifyTelegramLogin } from './login/telegram.ts'
 import { CODE_TTL_MS, memoryStore, sqliteStore, type PendingCode } from './oauth/store.ts'
 import { Tokens } from './oauth/tokens.ts'
-import { consentPage, document, escapeHtml, failPage, html, landingPage, raw, tokenFormPage } from './ui/index.ts'
 
 const SECRET = 'x'.repeat(32)
-const service = { name: 'test', repo: 'https://github.com/aimuzov/test' }
 
 test('redirect: колбэки Claude, loopback по http и дополнительные из конфига', () => {
 	assert.ok(isAllowedRedirectUri('https://claude.ai/api/mcp/auth_callback'))
@@ -105,39 +105,31 @@ test('telegram: подпись, свежесть и чужие поля', () => 
 	assert.ok(verifyTelegramLogin({ ...signed(), request: 'x' }, BOT, now))
 })
 
-test('html экранирует строки и пропускает SafeHtml, массивы и пустые условия', () => {
-	const evil = '<script>"x"</script>'
-
-	assert.equal(escapeHtml(evil), '&lt;script&gt;&quot;x&quot;&lt;/script&gt;')
-
-	assert.equal(
-		html`<p title="${evil}">${[raw('<b>'), 'a&b', null, false, undefined]}</p>`.value,
-		'<p title="&lt;script&gt;&quot;x&quot;&lt;/script&gt;"><b>a&amp;b</p>',
+test('адрес страницы ошибки: текст в query, сообщение необязательно', () => {
+	const url = new URL(
+		errorPage({ code: 'invalid_request', title: 'Ссылка устарела', message: 'Начни заново' }),
+		'http://x',
 	)
+
+	assert.equal(url.pathname, '/error')
+	assert.equal(url.searchParams.get('code'), 'invalid_request')
+	assert.equal(url.searchParams.get('title'), 'Ссылка устарела')
+	assert.equal(url.searchParams.get('message'), 'Начни заново')
+	assert.equal(new URL(errorPage({ title: 't' }), 'http://x').search, '?code=error&title=t')
 })
 
-test('страницы кита: экранируют ввод, без инлайн-скриптов и стилей под CSP', () => {
-	const evil = '<img src=x onerror=alert(1)>'
-	const pages = [
-		document({ service, title: evil, main: evil }),
-		landingPage({ service, tagline: evil, mcpUrl: 'https://a.b/mcp', tools: [evil] }),
-		consentPage({ service, client: { name: evil, host: 'claude.ai' }, grants: [evil], action: '', error: evil }),
-		tokenFormPage({
-			service,
-			client: { host: 'claude.ai' },
-			title: evil,
-			action: '/authorize/callback',
-			fields: [{ name: 'token', label: evil, value: evil }],
-			hidden: { request: evil },
-		}),
-		failPage({ service, title: evil, message: evil, code: evil }),
-	]
+test('контекст входа из фрагмента и колбэк с запросом для виджета', () => {
+	const context = readLoginContext('#request=r.1&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&dev=7')
 
-	for (const page of pages) {
-		assert.ok(!page.includes(evil), 'ввод попал в разметку как есть')
-		assert.ok(page.startsWith('<!doctype html>'))
-		assert.doesNotMatch(page, /<script(?![^>]*\bsrc=)/, 'инлайн-скрипт')
-		assert.doesNotMatch(page, /\sstyle=|<style/, 'инлайн-стиль')
-		assert.match(page, /aimuzov\/test/)
-	}
+	assert.deepEqual(context, {
+		request: 'r.1',
+		callback: '/authorize/callback',
+		client: 'Claude',
+		host: 'claude.ai',
+		error: '',
+		dev: '7',
+	})
+
+	assert.equal(callbackUrl(context, 'https://a.b').href, 'https://a.b/authorize/callback?request=r.1')
+	assert.equal(readLoginContext('').request, '')
 })

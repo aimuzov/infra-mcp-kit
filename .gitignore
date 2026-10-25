@@ -2,3 +2,7 @@ node_modules
 build
 *.tgz
 .env
+e2e/connector/node_modules
+e2e/connector/build
+e2e/connector/.astro
+test-results

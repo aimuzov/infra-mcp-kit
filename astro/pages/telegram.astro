@@ -1,0 +1,18 @@
+---
+import config from 'virtual:infra-mcp-kit/pages'
+
+import TelegramLogin from '@aimuzov/infra-mcp-kit/astro/components/telegram-login.svelte'
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+
+const { service, telegram } = config
+
+if (!telegram) throw new Error('Страница /login/telegram без `telegram` в mcpPages')
+
+// Виджет нужен только здесь, поэтому и источники Telegram пускаем только на этой странице.
+Astro.csp?.insertScriptResource('https://telegram.org')
+Astro.csp?.insertDirective('frame-src https://oauth.telegram.org')
+---
+
+<Layout title={`Вход в ${service.name}`} screen="consent">
+	<TelegramLogin client:load service={service.name} botName={telegram.botName} grants={telegram.grants} />
+</Layout>

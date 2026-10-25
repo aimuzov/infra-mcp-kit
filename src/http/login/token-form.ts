@@ -1,17 +1,22 @@
 import { LoginError, type Grant, type Login } from '#kit/http/oauth/provider'
-import { tokenFormPage, type FormField } from '#kit/http/ui/index'
+
+/** Поле формы, как его описывает `mcpPages({ tokenForm })`: серверу нужны имя и подпись. */
+export type TokenFormField = {
+	name: string
+	label: string
+	required?: boolean
+}
 
 export type TokenFormLoginOptions = {
-	title: string
-	/** Абзац под заголовком: зачем токен и что с ним будет. */
-	lead?: string
-	fields: FormField[]
-	submit?: string
+	/** Те же поля, что в `tokenForm.fields` у `mcpPages`: по ним сервер собирает значения. */
+	fields: TokenFormField[]
 	/**
 	 * Проверить введённое и сказать, кто это. Обычно здесь стучатся в API сервиса с этим токеном.
 	 * `LoginError` вернёт человека на форму с текстом ошибки.
 	 */
 	verify(values: Record<string, string>): Grant | Promise<Grant>
+	/** Статическая страница формы, по умолчанию `/login` из `mcpPages`. */
+	page?: string
 }
 
 /**
@@ -22,24 +27,7 @@ export type TokenFormLoginOptions = {
 export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 	return {
 		sealsSecrets: true,
-		render: ({ service, client, callbackUrl, request, error }) => {
-			const action = new URL(callbackUrl)
-
-			// Запрос едет скрытым полем, а не в query: так он не попадёт в логи прокси.
-			action.search = ''
-
-			return tokenFormPage({
-				service,
-				client,
-				title: options.title,
-				lead: options.lead,
-				action: action.pathname,
-				fields: options.fields,
-				hidden: { request },
-				submit: options.submit,
-				error,
-			})
-		},
+		page: options.page ?? '/login',
 		async complete(req) {
 			if (req.method !== 'POST') throw new LoginError('Отправь форму ещё раз')
 

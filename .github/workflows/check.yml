@@ -23,11 +23,14 @@ jobs:
       - uses: ./check
         with:
           smoke: ''
-          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"
-      # Экраны UI в настоящем Chromium: CSP режет инлайн-код молча,
+          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing', '@aimuzov/infra-mcp-kit/astro'].map((m) => import(m)))"
+      # Страницы и острова кита живут в `astro/` исходниками, их собирает сервер. Типы
+      # проверяем здесь: svelte-check по островам и astro check по коннектору-фикстуре.
+      - run: npm run check:pages
+      # Экраны в настоящем Chromium на сборке фикстуры: CSP режет инлайн-код молча,
       # это видно только в консоли браузера. Браузер кэшируется по версии
       # Playwright, системные библиотеки ставятся из apt каждый прогон.
-      # Снимки не сравниваем: шрифты на раннере другие.
+      # Снимки не сравниваем: шрифты на раннере другие, они уходят артефактом.
       - id: playwright
         run: echo "version=$(npm ls playwright --json | jq -r '.dependencies.playwright.version')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
@@ -36,3 +39,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: test-results/screens
+          if-no-files-found: ignore

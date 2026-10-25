@@ -1,0 +1,14 @@
+---
+import config from 'virtual:infra-mcp-kit/pages'
+
+import TokenForm from '@aimuzov/infra-mcp-kit/astro/components/token-form.svelte'
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+
+const { service, tokenForm } = config
+
+if (!tokenForm) throw new Error('Страница /login без `tokenForm` в mcpPages')
+---
+
+<Layout title={`Вход в ${service.name}`} screen="token">
+	<TokenForm client:load {...tokenForm} />
+</Layout>

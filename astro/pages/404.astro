@@ -1,0 +1,20 @@
+---
+import NotFound from '@aimuzov/infra-site-kit/not-found.astro'
+
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+---
+
+<!-- 404 общая с сайтами. Подсказок по sitemap нет: у коннектора две-три страницы. -->
+<Layout title="Такой страницы нет" screen="not-found">
+	<div class="missing">
+		<NotFound suggest={false} />
+	</div>
+</Layout>
+
+<style>
+	.missing {
+		display: grid;
+		flex: 1;
+		align-items: center;
+	}
+</style>

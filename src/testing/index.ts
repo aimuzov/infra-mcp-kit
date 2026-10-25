@@ -4,8 +4,11 @@
  */
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { Client, type ClientOptions } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -13,8 +16,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { Express } from 'express'
 
-/** Подпись входа как у Telegram: в `/http` она останется до 2.0 ради совместимости. */
-export { signTelegramLogin } from '#kit/http/login/telegram'
+import { signTelegramLogin } from '#kit/http/login/telegram'
+
+/** Подпись входа как у Telegram, чтобы тест прошёл вход без виджета. */
+export { signTelegramLogin }
 
 /**
  * Клиент, подключённый к серверу через пару транспортов в памяти. Во втором
@@ -75,15 +80,43 @@ export async function startHttp(build: (base: string) => Express | Promise<Expre
 	}
 }
 
+/**
+ * Каталог с заглушками страниц `mcpPages`: `publicDir` для тестов OAuth без сборки Astro.
+ * В каждой странице только её имя, по нему тест видит, что отдал сервер.
+ */
+export function fakePages(dir = mkdtempSync(join(tmpdir(), 'mcp-pages-'))): string {
+	for (const name of ['index', 'login', 'login/telegram', 'error', '404']) {
+		mkdirSync(dirname(join(dir, name)), { recursive: true })
+		writeFileSync(join(dir, `${name}.html`), `<!doctype html><title>${name}</title>page:${name}\n`)
+	}
+
+	return dir
+}
+
 export const TEST_REDIRECT = 'http://127.0.0.1:33418/callback'
+
+/**
+ * Что кит положил во фрагмент статической страницы входа: то же читает её остров.
+ * `callback` уже абсолютный адрес колбэка.
+ */
+export type LoginStep = {
+	/** Адрес страницы входа без фрагмента, например `/login`. */
+	page: string
+	request: string
+	callback: URL
+	client: string
+	host: string
+	error: string
+	dev: string
+}
 
 export type OAuthFlowOptions = {
 	base: string
 	/**
-	 * Пройти вход: по HTML страницы входа и адресу колбэка вернуть ответ колбэка.
-	 * Обычно это `fetch` с `redirect: 'manual'`.
+	 * Пройти вход, как это сделал бы человек на странице: вернуть ответ колбэка.
+	 * Готовые варианты -- `submitForm`, `telegramSigned`, `devLink`.
 	 */
-	login(page: string, callbackUrl: URL): Promise<Response>
+	login(step: LoginStep): Promise<Response>
 	redirectUri?: string
 }
 
@@ -98,26 +131,60 @@ export type OAuthFlowResult = {
 	refresh(refreshToken?: string): Promise<Response>
 }
 
-/** Достать адрес колбэка со страницы входа: из виджета Telegram, ссылки или формы. */
-export function callbackFrom(page: string, base: string): URL {
-	const match = page.match(/data-auth-url="([^"]+)"/) ?? page.match(/href="([^"]*\/authorize\/callback[^"]*)"/)
+/** Разобрать редирект на страницу входа: путь и контекст из фрагмента. */
+export function loginStep(location: string, base: string): LoginStep {
+	const url = new URL(location, base)
+	const hash = new URLSearchParams(url.hash.slice(1))
+	const get = (key: string) => hash.get(key) ?? ''
 
-	if (match?.[1]) return new URL(match[1].replaceAll('&amp;', '&'), base)
+	assert.ok(get('request'), `в адресе входа нет запроса: ${location}`)
 
-	const form = page.match(/<form[^>]*action="([^"]+)"/)
-
-	assert.ok(form?.[1], 'на странице входа нет ни виджета, ни формы')
-
-	return new URL(form[1].replaceAll('&amp;', '&'), base)
+	return {
+		page: url.pathname,
+		request: get('request'),
+		callback: new URL(get('callback'), base),
+		client: get('client'),
+		host: get('host'),
+		error: get('error'),
+		dev: get('dev'),
+	}
 }
 
-/** Значение скрытого поля формы. */
-export function hiddenField(page: string, name: string): string {
-	const match = page.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`))
+/** Вход формой токена: POST на колбэк с запросом и полями, как отправит остров. */
+export function submitForm(fields: Record<string, string>) {
+	return (step: LoginStep) =>
+		fetch(step.callback, {
+			method: 'POST',
+			redirect: 'manual',
+			headers: { 'content-type': 'application/x-www-form-urlencoded' },
+			body: new URLSearchParams({ request: step.request, ...fields }),
+		})
+}
 
-	assert.ok(match?.[1], `на странице нет поля ${name}`)
+/** Вход через Telegram: GET на колбэк с подписанным query, как вернёт виджет. */
+export function telegramSigned(user: Record<string, string>, botToken: string) {
+	return (step: LoginStep) => {
+		const url = new URL(step.callback)
+		const signed = signTelegramLogin({ auth_date: String(Math.floor(Date.now() / 1000)), ...user }, botToken)
 
-	return match[1].replaceAll('&amp;', '&')
+		url.searchParams.set('request', step.request)
+
+		for (const [key, value] of Object.entries(signed)) url.searchParams.set(key, value)
+
+		return fetch(url, { redirect: 'manual' })
+	}
+}
+
+/** Dev-вход Telegram на localhost: ссылка, которую страница рисует вместо виджета. */
+export function devLink() {
+	return (step: LoginStep) => {
+		const url = new URL(step.callback)
+
+		url.searchParams.set('request', step.request)
+		url.searchParams.set('dev', '1')
+
+		return fetch(url, { redirect: 'manual' })
+	}
 }
 
 /** Регистрация клиента, authorize, вход, колбэк и обмен кода на токены, как это делает Claude. */
@@ -146,14 +213,23 @@ export async function oauthFlow({
 			code_challenge_method: 'S256',
 			state: 'st',
 		})}`,
+		{ redirect: 'manual' },
 	)
 
-	assert.equal(authorize.status, 200)
+	assert.equal(authorize.status, 302, await authorize.clone().text())
 
-	const page = await authorize.text()
-	const callback = await login(page, callbackFrom(page, base))
+	const callback = await login(loginStep(authorize.headers.get('location') ?? '', base))
 
-	assert.equal(callback.status, 302, await callback.clone().text())
+	// Отказ входа -- редирект на страницу входа или ошибки с текстом в адресе: его и показываем.
+	const refused = callback.headers.get('location')
+
+	assert.equal(
+		callback.status,
+		302,
+		`вход не выдал код: ${callback.status} ${
+			refused ? decodeURIComponent(refused.replaceAll('+', ' ')) : await callback.clone().text()
+		}`,
+	)
 
 	const location = new URL(callback.headers.get('location') ?? '')
 

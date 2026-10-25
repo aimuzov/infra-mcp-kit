@@ -1,7 +1,7 @@
 {
 	"name": "@aimuzov/infra-mcp-kit",
 	"version": "1.0.3",
-	"description": "Shared core, hosted OAuth connector, UI pages and test helpers for the aimuzov MCP servers",
+	"description": "Shared core, hosted OAuth connector, Astro pages and test helpers for the aimuzov MCP servers",
 	"keywords": [
 		"mcp",
 		"model-context-protocol",
@@ -32,10 +32,16 @@
 		"./testing": {
 			"types": "./build/testing/index.d.ts",
 			"default": "./build/testing/index.js"
-		}
+		},
+		"./astro": {
+			"types": "./build/astro/index.d.ts",
+			"default": "./build/astro/index.js"
+		},
+		"./astro/*": "./astro/*"
 	},
 	"files": [
-		"build"
+		"build",
+		"astro"
 	],
 	"publishConfig": {
 		"access": "public",
@@ -45,14 +51,15 @@
 		"node": ">=26"
 	},
 	"scripts": {
-		"build": "rm -rf build && tsc -p tsconfig.build.json && cp -R src/http/ui/assets build/http/ui/",
+		"build": "rm -rf build && tsc -p tsconfig.build.json",
 		"typecheck": "tsc",
 		"test": "node --conditions=infra-mcp-kit-source --test 'src/**/*.test.ts'",
 		"format": "oxlint --fix && prettier --write .",
 		"format:check": "prettier --check .",
 		"lint": "oxlint --deny-warnings",
 		"prepare": "npm run build",
-		"test:ui": "node --conditions=infra-mcp-kit-source --test src/http/ui/screens.e2e.ts"
+		"test:ui": "npm run build && node --conditions=infra-mcp-kit-source --test e2e/pages.e2e.ts",
+		"check:pages": "svelte-check --tsconfig ./tsconfig.astro.json && node e2e/pages.ts check"
 	},
 	"dependencies": {
 		"@types/express": "5.0.6",
@@ -63,12 +70,19 @@
 		"@modelcontextprotocol/sdk": "^1.32.0"
 	},
 	"devDependencies": {
-		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.0.0",
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.1.0",
+		"@astrojs/check": "0.9.10",
+		"@astrojs/svelte": "9.0.1",
+		"@lucide/svelte": "1.39.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@types/node": "26.6.5",
+		"astro": "7.3.7",
 		"oxlint": "1.87.0",
 		"playwright": "1.64.0",
+		"postcss-nested": "8.0.1",
 		"prettier": "3.9.9",
+		"svelte": "5.57.2",
+		"svelte-check": "4.7.6",
 		"typescript": "6.0.3"
 	},
 	"imports": {

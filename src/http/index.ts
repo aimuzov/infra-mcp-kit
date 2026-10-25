@@ -1,4 +1,12 @@
-export { createHttpApp, listen, serveHttp, type HttpAppOptions, type HttpAuthOptions, type HttpContext } from './app.ts'
+export {
+	createHttpApp,
+	listen,
+	serveHttp,
+	type HttpAppOptions,
+	type HttpAuthOptions,
+	type HttpContext,
+	type Service,
+} from './app.ts'
 export {
 	CLAUDE_CALLBACKS,
 	devOnly,
@@ -8,16 +16,16 @@ export {
 	MIN_SECRET_LENGTH,
 	type HttpConfig,
 } from './config.ts'
+export { apiError, errorPage, requireSession, sendJson, type ApiError, type ErrorPageOptions } from './json.ts'
 export {
 	signTelegramLogin,
-	telegramButton,
 	telegramLogin,
 	telegramUser,
 	verifyTelegramLogin,
 	type TelegramLoginOptions,
 	type TelegramUser,
 } from './login/telegram.ts'
-export { tokenFormLogin, type TokenFormLoginOptions } from './login/token-form.ts'
+export { tokenFormLogin, type TokenFormField, type TokenFormLoginOptions } from './login/token-form.ts'
 export {
 	CALLBACK_PATH,
 	CODE_TTL_MS,
@@ -32,7 +40,6 @@ export {
 	type AuthStore,
 	type Grant,
 	type Login,
-	type LoginPageContext,
 	type MountedOAuth,
 	type OAuthOptions,
 	type PendingCode,
@@ -42,5 +49,3 @@ export {
 	type TokensOptions,
 } from './oauth/index.ts'
 export { readCookie, sameOrigin, sessions, type Sessions } from './session.ts'
-export * as ui from './ui/index.ts'
-export { escapeHtml, html, raw, SafeHtml, type HtmlValue, type Service } from './ui/index.ts'

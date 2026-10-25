@@ -10,9 +10,12 @@ const { service } = config
 
 <Layout title={service.name} screen="landing">
 	<section class="hero">
-		<h1 class="glitch" data-text={service.name}>
-			{service.name}
-		</h1>
+		<div class="hero__title">
+			{service.logoSvg && <span class="hero__logo" set:html={service.logoSvg} />}
+			<h1 class="glitch" data-text={service.name}>
+				{service.name}
+			</h1>
+		</div>
 		{service.tagline && <p class="tagline">{service.tagline}</p>}
 		{service.lead && <p class="lead">{service.lead}</p>}
 	</section>

@@ -16,6 +16,8 @@ export default defineConfig({
 				tagline: 'Проверка страниц кита на Astro',
 				lead: 'Статика из кита, данные под пользователя дорисовывают острова в браузере.',
 				tools: ['whoami', 'ping'],
+				logo: './logo.svg',
+				glitch: { a: '#f11f24', b: '#5fe8b0' },
 			},
 			tokenForm: {
 				title: 'Подключение fixture',

@@ -213,6 +213,29 @@ h1 {
 	margin-bottom: 8px;
 }
 
+/* Знак сервиса слева от имени, по высоте строчных букв заголовка. */
+.hero__title {
+	display: flex;
+	gap: 0.22em;
+	align-items: center;
+	margin-bottom: 18px;
+	font-size: clamp(44px, 10vw, 88px);
+
+	& h1 {
+		margin: 0;
+	}
+
+	& .hero__logo {
+		display: flex;
+		flex: none;
+
+		& svg {
+			width: 0.56em;
+			height: 0.56em;
+		}
+	}
+}
+
 .tagline {
 	max-width: 28ch;
 	margin: 0 0 12px;
@@ -245,13 +268,13 @@ h1 {
 	}
 
 	&::before {
-		color: var(--signal-red);
+		color: var(--signal-glitch-a, var(--signal-red));
 		clip-path: inset(0 0 55% 0);
 		transform: translateX(-2px);
 	}
 
 	&::after {
-		color: var(--signal-cyan);
+		color: var(--signal-glitch-b, var(--signal-cyan));
 		clip-path: inset(55% 0 0 0);
 		transform: translateX(2px);
 	}
@@ -299,13 +322,13 @@ h1 {
 /* Главная кнопка с расслоением, как у марки в шапке. */
 .button--primary {
 	box-shadow:
-		-2px 0 0 var(--signal-red),
-		2px 0 0 var(--signal-cyan);
+		-2px 0 0 var(--signal-glitch-a, var(--signal-red)),
+		2px 0 0 var(--signal-glitch-b, var(--signal-cyan));
 
 	&:hover:not(:disabled) {
 		box-shadow:
-			-3px 0 0 var(--signal-red),
-			3px 0 0 var(--signal-cyan);
+			-3px 0 0 var(--signal-glitch-a, var(--signal-red)),
+			3px 0 0 var(--signal-glitch-b, var(--signal-cyan));
 	}
 }
 
@@ -389,6 +412,15 @@ h1 {
 	& .handshake__mark {
 		width: 30px;
 		height: 24px;
+	}
+
+	& .handshake__logo {
+		display: flex;
+
+		& svg {
+			width: 28px;
+			height: 28px;
+		}
 	}
 
 	& .handshake__wire {

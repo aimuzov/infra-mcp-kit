@@ -220,6 +220,23 @@ describe('острова', () => {
 		await context.close()
 	})
 
+	test('знак сервиса у имени и на экране входа, глитч в цветах сервиса', async () => {
+		const { page, context } = await open('/')
+
+		assert.equal(await page.locator('.hero__title .hero__logo svg').count(), 1)
+
+		const glitch = await page.locator('.hero h1').evaluate((node) => ({
+			a: getComputedStyle(node, '::before').color,
+			b: getComputedStyle(node, '::after').color,
+		}))
+
+		assert.deepEqual(glitch, { a: 'rgb(241, 31, 36)', b: 'rgb(95, 232, 176)' })
+		await page.goto(`${http.base}/login`)
+		assert.equal(await page.locator('.handshake__logo svg').count(), 1)
+		assert.equal(await page.locator('.handshake__mark').count(), 0)
+		await context.close()
+	})
+
 	test('подпись автора -- Credit из site-kit со ссылкой на исходники', async () => {
 		const { page, context } = await open('/')
 

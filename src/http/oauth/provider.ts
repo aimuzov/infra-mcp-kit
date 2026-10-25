@@ -177,7 +177,9 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const claims = await this.options.tokens.verify('access', token)
 
-		if (!claims) throw new InvalidTokenError('Токен недействителен')
+		// Текст уходит в заголовок WWW-Authenticate, а кириллицу Node туда не пускает:
+		// вместо 401, по которому клиент обновляет токен, получился бы 500.
+		if (!claims) throw new InvalidTokenError('Invalid or expired token')
 
 		return {
 			token,

@@ -159,6 +159,20 @@ describe('OAuth: отказы', () => {
 		assert.match(res.headers.get('www-authenticate') ?? '', /oauth-protected-resource/)
 		assert.equal((await fetch(`${base}/mcp`)).status, 405)
 	})
+
+	test('недействительный токен доступа даёт 401, а не 500', async () => {
+		const base = await start({
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
+		})
+		const res = await fetch(`${base}/mcp`, {
+			method: 'POST',
+			headers: { authorization: 'Bearer garbage', 'content-type': 'application/json' },
+			body: '{}',
+		})
+
+		assert.equal(res.status, 401)
+		assert.match(res.headers.get('www-authenticate') ?? '', /invalid_token/)
+	})
 })
 
 describe('OAuth через форму токена с шифрованием', () => {

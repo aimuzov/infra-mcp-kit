@@ -62,19 +62,20 @@
 		"check:pages": "svelte-check --tsconfig ./tsconfig.astro.json && node e2e/pages.ts check"
 	},
 	"dependencies": {
-		"@types/express": "5.0.6",
 		"express": "5.2.1",
 		"jose": "6.2.8"
 	},
 	"peerDependencies": {
-		"@modelcontextprotocol/sdk": "^1.32.0"
+		"@modelcontextprotocol/sdk": "^1.32.0",
+		"@types/express": "^5.0.0"
 	},
 	"devDependencies": {
-		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.1.0",
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#bugfix/ui-no-style-attr",
 		"@astrojs/check": "0.9.10",
 		"@astrojs/svelte": "9.0.1",
 		"@lucide/svelte": "1.39.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
+		"@types/express": "5.0.6",
 		"@types/node": "26.6.5",
 		"astro": "7.3.7",
 		"oxlint": "1.87.0",
@@ -90,6 +91,11 @@
 			"infra-mcp-kit-source": "./src/*.ts",
 			"types": "./build/*.d.ts",
 			"default": "./build/*.js"
+		}
+	},
+	"peerDependenciesMeta": {
+		"@types/express": {
+			"optional": true
 		}
 	}
 }

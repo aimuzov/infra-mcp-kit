@@ -21,6 +21,8 @@ export function createLogger({
 	file,
 	write = (line) => process.stderr.write(line),
 }: LoggerOptions = {}): Logger {
+	let toFile = file
+
 	const at = (lvl: LogLevel) => (message: string, meta?: unknown) => {
 		if (ORDER[lvl] > ORDER[level]) return
 
@@ -29,11 +31,14 @@ export function createLogger({
 
 		write(line)
 
-		if (file) {
+		if (toFile) {
 			try {
-				appendFileSync(file, line)
-			} catch {
-				// Лог в файл -- удобство, падать из-за него нельзя.
+				appendFileSync(toFile, line)
+			} catch (error) {
+				// Лог в файл -- удобство, падать из-за него нельзя. Но и терять молча тоже:
+				// говорим один раз и дальше пишем только в основной поток.
+				write(`[${new Date().toISOString()}] WARN log file ${toFile} is unavailable: ${String(error)}\n`)
+				toFile = undefined
 			}
 		}
 	}
@@ -49,10 +54,19 @@ function stringify(value: unknown): string {
 	}
 }
 
-const envLevel = process.env.LOG_LEVEL as LogLevel | undefined
+/** Уровень по имени; неизвестное имя (и `toString` с прототипа) не уровень. */
+export function parseLogLevel(value: string | undefined): LogLevel | undefined {
+	const name = value?.trim().toLowerCase()
+
+	return name && Object.hasOwn(ORDER, name) ? (name as LogLevel) : undefined
+}
+
+const envLevel = process.env.LOG_LEVEL
 
 /** Общий логгер процесса. Уровень и файл из `LOG_LEVEL` и `LOG_FILE`. */
 export const log = createLogger({
-	level: envLevel && envLevel in ORDER ? envLevel : 'info',
+	level: parseLogLevel(envLevel) ?? 'info',
 	file: process.env.LOG_FILE || undefined,
 })
+
+if (envLevel?.trim() && !parseLogLevel(envLevel)) log.warn(`LOG_LEVEL "${envLevel}" is unknown, using info`)

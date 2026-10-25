@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
+import { parseLogLevel } from './log.ts'
 import { messageOf } from './results.ts'
 import { serveStdio } from './stdio.ts'
 
@@ -67,6 +68,10 @@ export async function runCli({
 		await run(args)
 	} catch (error) {
 		console.error(`${name}: ${messageOf(error)}`)
+
+		// Для своих ошибок хватает строки, а неожиданный TypeError без стека не найти.
+		if (parseLogLevel(process.env.LOG_LEVEL) === 'debug' && error instanceof Error) console.error(error.stack)
+
 		process.exitCode = 1
 	}
 }

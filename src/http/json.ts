@@ -1,5 +1,4 @@
-import type { NextFunction, Request, Response } from 'express'
-
+import type { TokenClaims } from './oauth/tokens.ts'
 import type { Sessions } from './session.ts'
 
 /**
@@ -8,15 +7,17 @@ import type { Sessions } from './session.ts'
  */
 export type ApiError = { error: { code: string; message: string } }
 
-export function apiError(res: Response, status: number, code: string, message: string): void {
-	res.status(status)
-		.set('Cache-Control', 'no-store')
-		.json({ error: { code, message } } satisfies ApiError)
+export function apiError(status: number, code: string, message: string): Response {
+	return sendJson({ error: { code, message } } satisfies ApiError, status)
 }
 
 /** Ответ JSON без кэша: состояние кабинета у каждого своё и меняется на глазах. */
-export function sendJson(res: Response, body: unknown, status = 200): void {
-	res.status(status).set('Cache-Control', 'no-store').json(body)
+export function sendJson(body: unknown, status = 200, headers?: HeadersInit): Response {
+	const response = Response.json(body, { status, headers })
+
+	response.headers.set('cache-control', 'no-store')
+
+	return response
 }
 
 export type ErrorPageOptions = { code?: string; title: string; message?: string }
@@ -31,16 +32,13 @@ export function errorPage({ code = 'error', title, message }: ErrorPageOptions):
 }
 
 /**
- * Пускает дальше только с cookie кабинета, сессия -- в `res.locals.session`. Без неё
- * 401: `AccountShell` на это показывает экран входа.
+ * Сессия кабинета или готовый ответ 401: `AccountShell` на него показывает экран входа.
+ *
+ * ```ts
+ * const session = await requireSession(sessions, request)
+ * if (session instanceof Response) return session
+ * ```
  */
-export function requireSession(sessions: Sessions) {
-	return async (req: Request, res: Response, next: NextFunction) => {
-		const session = await sessions.read(req)
-
-		if (!session) return apiError(res, 401, 'unauthorized', 'Нужно войти')
-
-		res.locals.session = session
-		next()
-	}
+export async function requireSession(sessions: Sessions, request: Request): Promise<TokenClaims | Response> {
+	return (await sessions.read(request)) ?? apiError(401, 'unauthorized', 'Нужно войти')
 }

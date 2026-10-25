@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, describe, test } from 'node:test'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
+import { McpServer } from '#kit/mcp'
 import { fakePages, startHttp, type RunningHttp } from '#kit/testing/index'
 
 import { createHttpApp } from './app.ts'
@@ -23,28 +23,36 @@ async function start(publicUrl?: string, pages = true) {
 			service: { name: 'test' },
 			createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
 			publicDir: pages ? fakePages() : undefined,
-			routes(app, { tokens }) {
+			async routes(request, { tokens }) {
 				const cabinet = sessions(tokens, url)
-				const guard = requireSession(cabinet)
+				const route = `${request.method} ${new URL(request.url).pathname}`
 
-				app.post('/account/login', sameOrigin(url), async (_req, res) => {
-					await cabinet.write(res, { sub: 'u1' })
-					sendJson(res, { ok: true })
-				})
+				if (route === 'POST /account/login') {
+					return (
+						sameOrigin(url, request) ??
+						sendJson({ ok: true }, 200, { 'set-cookie': await cabinet.cookie({ sub: 'u1' }) })
+					)
+				}
 
-				app.post('/account/logout', sameOrigin(url), (_req, res) => {
-					cabinet.clear(res)
-					sendJson(res, { ok: true })
-				})
+				if (route === 'POST /account/logout') {
+					return (
+						sameOrigin(url, request) ?? sendJson({ ok: true }, 200, { 'set-cookie': cabinet.clearCookie() })
+					)
+				}
 
-				app.get('/account/state', guard, (_req, res) => sendJson(res, { sub: res.locals.session.sub }))
-				app.get('/account/busy', (_req, res) => apiError(res, 409, 'busy', 'Идёт сборка'))
+				if (route === 'GET /account/state') {
+					const session = await requireSession(cabinet, request)
 
-				app.get('/account/boom', () => {
-					throw new Error('boom')
-				})
+					return session instanceof Response ? session : sendJson({ sub: session.sub })
+				}
+
+				if (route === 'GET /account/busy') return apiError(409, 'busy', 'Идёт сборка')
+
+				if (route === 'GET /account/boom') throw new Error('boom')
+
+				return undefined
 			},
-		}).app
+		})
 	})
 
 	running.push(http)

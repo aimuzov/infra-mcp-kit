@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { after, describe, test } from 'node:test'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
+import { McpServer } from '#kit/mcp'
 import {
 	fakePages,
 	loginStep,
@@ -27,15 +27,14 @@ const login = tokenFormLogin({
 })
 
 async function start() {
-	const http = await startHttp(
-		(base) =>
-			createHttpApp({
-				config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
-				service: { name: 'test' },
-				createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
-				publicDir: fakePages(),
-				auth: { store: memoryStore(), login, tokens: 'encrypt' },
-			}).app,
+	const http = await startHttp((base) =>
+		createHttpApp({
+			config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
+			service: { name: 'test' },
+			createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
+			publicDir: fakePages(),
+			auth: { store: memoryStore(), login, tokens: 'encrypt' },
+		}),
 	)
 
 	running.push(http)

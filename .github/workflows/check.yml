@@ -27,7 +27,8 @@ jobs:
           # Экраны в настоящем Chromium на сборке фикстуры: CSP режет инлайн-код молча,
           # это видно только в консоли браузера.
           ui: true
-          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing', '@aimuzov/infra-mcp-kit/astro'].map((m) => import(m)))"
+          # Без `/testing`: ему нужен клиент SDK, а он есть только в devDependencies сервера.
+          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/astro'].map((m) => import(m)))"
       # Страницы и острова кита живут в `astro/` исходниками, их собирает сервер. Типы
       # проверяем здесь: svelte-check по островам и astro check по коннектору-фикстуре.
       - run: npm run check:pages

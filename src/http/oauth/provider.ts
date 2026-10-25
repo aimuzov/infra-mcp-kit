@@ -1,21 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js'
+
+import { isAllowedRedirectUri } from '#kit/http/config'
+import type { AuthInfo } from '#kit/mcp'
+
 import {
 	InvalidClientMetadataError,
 	InvalidGrantError,
 	InvalidTokenError,
-} from '@modelcontextprotocol/sdk/server/auth/errors.js'
-import type { AuthorizationParams, OAuthServerProvider } from '@modelcontextprotocol/sdk/server/auth/provider.js'
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js'
-import type {
-	OAuthClientInformationFull,
-	OAuthTokenRevocationRequest,
-	OAuthTokens,
-} from '@modelcontextprotocol/sdk/shared/auth.js'
-import type { Request, Response } from 'express'
-
-import { isAllowedRedirectUri } from '#kit/http/config'
-
+	type OAuthClient,
+	type OAuthTokens,
+} from './errors.ts'
 import type { AuthStore } from './store.ts'
 import { ownClaims, REFRESH_FAMILY_TTL, RESERVED_CLAIMS, type Tokens } from './tokens.ts'
 
@@ -23,6 +17,24 @@ import { ownClaims, REFRESH_FAMILY_TTL, RESERVED_CLAIMS, type Tokens } from './t
 export type Grant = {
 	subject: string
 	claims?: Record<string, unknown>
+}
+
+/**
+ * С чем человек вернулся на колбэк входа. Тело формы кит уже прочитал: `Request`
+ * отдаёт его один раз.
+ */
+export type LoginInput = {
+	request: Request
+	method: string
+	query: Record<string, string>
+	form: Record<string, string>
+}
+
+export type AuthorizationParams = {
+	redirectUri: string
+	codeChallenge: string
+	state?: string
+	scopes?: string[]
 }
 
 /** Ошибка входа, которую стоит показать человеку на той же странице. */
@@ -42,7 +54,7 @@ export type Login = {
 	/** Что ещё положить во фрагмент страницы входа, например id для dev-входа на localhost. */
 	context?: Record<string, string>
 	/** Проверить то, с чем человек вернулся. `LoginError` покажет страницу входа снова. */
-	complete(req: Request): Grant | Promise<Grant>
+	complete(input: LoginInput): Grant | Promise<Grant>
 	/**
 	 * В claims едет чужой секрет, например API-токен. Тогда токены обязаны быть
 	 * зашифрованными, и `createHttpApp` не стартует с `sign`.
@@ -71,14 +83,17 @@ const MAX_REDIRECT_URIS = 10
  * OAuth-сервер на SDK: метаданные, регистрацию, PKCE и редиректы с ошибками ведёт роутер SDK,
  * а этот класс решает, кто пользователь и что значит токен.
  */
-export class KitOAuthProvider implements OAuthServerProvider {
+export class KitOAuthProvider {
 	private readonly options: ProviderOptions
 
 	constructor(options: ProviderOptions) {
 		this.options = options
 	}
 
-	get clientsStore(): OAuthRegisteredClientsStore {
+	get clientsStore(): {
+		getClient(id: string): OAuthClient | undefined
+		registerClient(client: OAuthClient): OAuthClient
+	} {
 		const { store, allowedRedirectUris } = this.options
 
 		return {
@@ -96,8 +111,8 @@ export class KitOAuthProvider implements OAuthServerProvider {
 
 				if (bad) throw new InvalidClientMetadataError(`redirect_uri is not allowed: ${bad}`)
 
-				// client_id и время регистрации проставил обработчик SDK.
-				const full = client as OAuthClientInformationFull
+				// client_id, секрет и время регистрации проставил роутер кита.
+				const full = client as OAuthClient
 
 				store.saveClient(full)
 
@@ -107,7 +122,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	}
 
 	/** Страница входа. Запрос подписывается и возвращается на колбэк, где выдаётся код. */
-	async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
+	async authorize(client: OAuthClient, params: AuthorizationParams): Promise<string> {
 		const request = await this.options.tokens.sign('authorize', {
 			sub: client.client_id,
 			redirect_uri: params.redirectUri,
@@ -115,11 +130,11 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			state: params.state ?? '',
 		})
 
-		res.redirect(302, this.loginPage(request, client, params.redirectUri))
+		return this.loginPage(request, client, params.redirectUri)
 	}
 
 	/** Адрес статической страницы входа с контекстом во фрагменте. */
-	loginPage(request: string, client: OAuthClientInformationFull, redirectUri: string, error?: string): string {
+	loginPage(request: string, client: OAuthClient, redirectUri: string, error?: string): string {
 		const { page, context } = this.options.login
 		const hash = new URLSearchParams({
 			...context,
@@ -157,7 +172,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 		return target
 	}
 
-	async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {
+	async challengeForAuthorizationCode(client: OAuthClient, code: string): Promise<string> {
 		const pending = this.options.store.peekCode(code)
 
 		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
@@ -166,7 +181,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	}
 
 	async exchangeAuthorizationCode(
-		client: OAuthClientInformationFull,
+		client: OAuthClient,
 		code: string,
 		_verifier?: string,
 		redirectUri?: string,
@@ -192,7 +207,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	 * Повтор потраченного значит, что токен утёк: отзываем всю цепочку, и войти
 	 * придётся заново и вору, и хозяину (RFC 9700, 4.14.2).
 	 */
-	async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string): Promise<OAuthTokens> {
+	async exchangeRefreshToken(client: OAuthClient, refreshToken: string): Promise<OAuthTokens> {
 		const { tokens, store } = this.options
 		const claims = await tokens.verify('refresh', refreshToken)
 
@@ -245,7 +260,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	}
 
 	/** RFC 7009: отзыв refresh-токена убивает его цепочку. Токен доступа доживает свой час. */
-	async revokeToken(client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): Promise<void> {
+	async revokeToken(client: OAuthClient, request: { token: string }): Promise<void> {
 		const claims = await this.options.tokens.verify('refresh', request.token)
 
 		// Неизвестный или чужой токен -- тоже успех: так велит RFC, и это ничего не выдаёт.

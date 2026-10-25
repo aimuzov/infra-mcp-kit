@@ -9,13 +9,13 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 
 import { createHttpApp } from '#kit/http/app'
 import { tokenFormLogin } from '#kit/http/login/token-form'
 import { LoginError } from '#kit/http/oauth/provider'
 import { memoryStore } from '#kit/http/oauth/store'
+import { McpServer } from '#kit/mcp'
 import {
 	connectHttp,
 	loginStep,
@@ -39,46 +39,43 @@ const problems: string[] = []
 before(async () => {
 	const publicDir = buildPages()
 
-	http = await startHttp(
-		(base) =>
-			createHttpApp({
-				config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
-				service: { name: 'fixture' },
-				publicDir,
-				auth: {
-					store: memoryStore(),
-					tokens: 'encrypt',
-					login: tokenFormLogin({
-						fields: [{ name: 'token', label: 'API-токен' }],
-						verify: ({ token }) => {
-							if (token !== 'good') throw new LoginError('Токен не подошёл')
+	http = await startHttp((base) =>
+		createHttpApp({
+			config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
+			service: { name: 'fixture' },
+			publicDir,
+			auth: {
+				store: memoryStore(),
+				tokens: 'encrypt',
+				login: tokenFormLogin({
+					fields: [{ name: 'token', label: 'API-токен' }],
+					verify: ({ token }) => {
+						if (token !== 'good') throw new LoginError('Токен не подошёл')
 
-							return { subject: 'user-1', claims: { apiToken: token } }
-						},
-					}),
-				},
-				createServer: (auth) => {
-					const server = new McpServer({ name: 'fixture', version: '0.0.0' })
+						return { subject: 'user-1', claims: { apiToken: token } }
+					},
+				}),
+			},
+			createServer: (auth) => {
+				const server = new McpServer({ name: 'fixture', version: '0.0.0' })
 
-					server.registerTool('whoami', { description: 'who' }, () => ({
-						content: [{ type: 'text', text: String(auth?.extra?.subject ?? 'nobody') }],
-					}))
+				server.registerTool('whoami', { description: 'who' }, () => ({
+					content: [{ type: 'text', text: String(auth?.extra?.subject ?? 'nobody') }],
+				}))
 
-					return server
-				},
-				// Кабинет фикстуры: cookie `fixture=1` -- вошёл, без неё 401.
-				routes: (app) => {
-					app.get('/account/state', (req, res) => {
-						if (!String(req.headers.cookie ?? '').includes('fixture=1')) {
-							return void res
-								.status(401)
-								.json({ error: { code: 'unauthorized', message: 'Нужно войти' } })
-						}
+				return server
+			},
+			// Кабинет фикстуры: cookie `fixture=1` -- вошёл, без неё 401.
+			routes: (request) => {
+				if (request.method !== 'GET' || new URL(request.url).pathname !== '/account/state') return undefined
 
-						res.json({ name: 'Алексей', corpus: 'ready' })
-					})
-				},
-			}).app,
+				if (!(request.headers.get('cookie') ?? '').includes('fixture=1')) {
+					return Response.json({ error: { code: 'unauthorized', message: 'Нужно войти' } }, { status: 401 })
+				}
+
+				return Response.json({ name: 'Алексей', corpus: 'ready' })
+			},
+		}),
 	)
 
 	browser = await chromium.launch()

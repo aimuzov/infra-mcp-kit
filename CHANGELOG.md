@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.1...v1.0.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* keep OAuth error text ASCII so a bad token gets 401, not 500 ([f6b1bc6](https://github.com/aimuzov/infra-mcp-kit/commit/f6b1bc651f27cc68b3fdfd3e711c41c4c78e86c8))
+* keep OAuth error text ASCII so a bad token gets 401, not 500 ([ad25898](https://github.com/aimuzov/infra-mcp-kit/commit/ad25898a21169eb879a5407ceabda8f237ae98cf))
+
 ## [1.0.1](https://github.com/aimuzov/infra-mcp-kit/compare/v1.0.0...v1.0.1) (2026-10-24)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.2](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.1...v3.0.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **deps:** move to infra-site-kit 4.1.2 so the theme peek stops lagging ([3c8725d](https://github.com/aimuzov/infra-mcp-kit/commit/3c8725d20a2fdaeba2868e67025a3fd68fe659dd))
+* **deps:** move to infra-site-kit 4.1.2 so the theme peek stops lagging ([1a2f97e](https://github.com/aimuzov/infra-mcp-kit/commit/1a2f97e341e7b8f0e85bcdc84ae1c2be4713c054))
+
 ## [3.0.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.0...v3.0.1) (2026-10-25)
 
 

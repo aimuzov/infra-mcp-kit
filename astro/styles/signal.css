@@ -147,13 +147,8 @@ code {
 		filter: drop-shadow(-1.5px 0 var(--signal-red)) drop-shadow(1.5px 0 var(--signal-cyan));
 	}
 
-	& .brand__owner,
-	& .brand__slash {
+	& .brand__label {
 		color: var(--signal-muted);
-	}
-
-	& .brand__name {
-		color: var(--signal-hue);
 	}
 }
 

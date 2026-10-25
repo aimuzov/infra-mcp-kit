@@ -159,6 +159,22 @@ describe('OAuth: отказы', () => {
 		assert.match(res.headers.get('www-authenticate') ?? '', /oauth-protected-resource/)
 		assert.equal((await fetch(`${base}/mcp`)).status, 405)
 	})
+
+	// Текст ошибки уходит в WWW-Authenticate, а не-ASCII в заголовке Node режет в 500.
+	// На 500 клиент не обновляет токен, и коннектор отваливается, когда истекает access.
+	test('битый токен на /mcp даёт 401, а не 500', async () => {
+		const base = await start({
+			auth: { store: memoryStore(), login: telegramLogin({ botToken: BOT, botName: 'bot' }) },
+		})
+		const res = await fetch(`${base}/mcp`, {
+			method: 'POST',
+			headers: { authorization: 'Bearer garbage', 'content-type': 'application/json' },
+			body: '{}',
+		})
+
+		assert.equal(res.status, 401)
+		assert.match(res.headers.get('www-authenticate') ?? '', /invalid_token/)
+	})
 })
 
 describe('OAuth через форму токена с шифрованием', () => {

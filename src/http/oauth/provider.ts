@@ -77,7 +77,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 			registerClient: (client) => {
 				const bad = client.redirect_uris.find((uri) => !isAllowedRedirectUri(uri, allowedRedirectUris))
 
-				if (bad) throw new InvalidClientMetadataError(`redirect_uri не разрешён: ${bad}`)
+				if (bad) throw new InvalidClientMetadataError(`redirect_uri is not allowed: ${bad}`)
 
 				// client_id и время регистрации проставил обработчик SDK.
 				const full = client as OAuthClientInformationFull
@@ -140,7 +140,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {
 		const pending = this.options.store.peekCode(code)
 
-		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Код недействителен')
+		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
 
 		return pending.codeChallenge
 	}
@@ -153,13 +153,14 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	): Promise<OAuthTokens> {
 		const pending = this.options.store.takeCode(code)
 
-		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Код недействителен')
+		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
 
-		if (redirectUri && redirectUri !== pending.redirectUri) throw new InvalidGrantError('redirect_uri не совпадает')
+		if (redirectUri && redirectUri !== pending.redirectUri)
+			throw new InvalidGrantError('redirect_uri does not match')
 
 		const grant = await this.options.tokens.verify('grant', pending.grant)
 
-		if (!grant) throw new InvalidGrantError('Код недействителен')
+		if (!grant) throw new InvalidGrantError('Invalid authorization code')
 
 		return this.issue(client.client_id, grant.sub, ownClaims(grant))
 	}
@@ -168,7 +169,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 		const claims = await this.options.tokens.verify('refresh', refreshToken)
 
 		if (!claims || claims.client_id !== client.client_id) {
-			throw new InvalidGrantError('Refresh-токен недействителен')
+			throw new InvalidGrantError('Invalid refresh token')
 		}
 
 		return this.issue(client.client_id, claims.sub, ownClaims(claims))
@@ -177,7 +178,7 @@ export class KitOAuthProvider implements OAuthServerProvider {
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const claims = await this.options.tokens.verify('access', token)
 
-		if (!claims) throw new InvalidTokenError('Токен недействителен')
+		if (!claims) throw new InvalidTokenError('Invalid access token')
 
 		return {
 			token,

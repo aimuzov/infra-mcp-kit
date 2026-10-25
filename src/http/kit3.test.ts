@@ -78,7 +78,8 @@ describe('совместимость с китом 2.x: живые сессии 
 	for (const mode of ['sign', 'encrypt'] as const) {
 		test(`auth.db и токены 2.1.0 в режиме ${mode}: клиент, токен доступа и refresh работают`, async () => {
 			// Токены выданы при создании фикстуры: часы те же, что тогда, плюс минута.
-			mock.method(Date, 'now', () => fixture.createdAt + 60_000)
+			// Подменяем весь Date, а не Date.now: jose сверяет срок по `new Date()`.
+			mock.timers.enable({ apis: ['Date'], now: fixture.createdAt + 60_000 })
 
 			try {
 				const db = join(mkdtempSync(join(tmpdir(), 'kit3-compat-')), 'auth.db')
@@ -110,7 +111,7 @@ describe('совместимость с китом 2.x: живые сессии 
 
 				assert.equal((await provider.verifyAccessToken(refreshed.access_token)).extra?.subject, `user-${mode}`)
 			} finally {
-				mock.restoreAll()
+				mock.timers.reset()
 			}
 		})
 	}

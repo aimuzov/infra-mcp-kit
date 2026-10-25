@@ -27,15 +27,15 @@ Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://
 - [**Pages**](#pages): the `mcpPages()` Astro integration with the landing, sign-in, error and 404 pages in the "Signal" style.
 - [**Testing**](#testing): in-memory and HTTP clients and the whole OAuth flow for `node --test`.
 - [**Actions**](#actions) `check` and `publish` for the server workflows.
-- [**Migrating from 1.x**](#migrating-from-1x).
+- [**Migrating from 2.x**](#migrating-from-2x) and [from 1.x](#migrating-from-1x).
 
 ## Install
 
 ```bash
-npm install -E github:aimuzov/infra-mcp-kit#v2.0.0
+npm install -E github:aimuzov/infra-mcp-kit#v3.0.0
 ```
 
-npm builds the package on install, `prepare` runs `tsc`. The `@modelcontextprotocol/sdk` peer stays in the server. Publishing to npm is ready but off until the repo variable `NPM_PUBLISH` is set.
+npm builds the package on install, `prepare` runs `tsc`. The `zod` 4 peer stays in the server, `@modelcontextprotocol/sdk` only in its devDependencies for `/testing`. Publishing to npm is ready but off until the repo variable `NPM_PUBLISH` is set.
 
 ## Core
 
@@ -52,6 +52,7 @@ await runCli({
 })
 ```
 
+- `McpServer` has the API of the SDK on top of tmcp: `registerTool`, `registerPrompt`, `registerResource` with `ResourceTemplate`, `server.server.elicitInput()`. A thrown handler becomes a result with `isError`, `notifications/cancelled` aborts `extra.signal`, the protocol version of every `initialize` goes to the log. `.tmcp` is the server underneath.
 - `runCli` handles `--help`, `--version`, `serve` (stdio, also with no arguments), `serve --http` and the service's own `commands`. An unknown command prints the usage and exits with 2, any error is one line `name: message` and exit 1; the stack is printed with `LOG_LEVEL=debug`.
 - `serveStdio(server, name)` connects a server to stdio.
 - `text`, `json` (plain objects also go to `structuredContent`) and `failure` build tool results. `tool(handler)` wraps a handler: a string becomes text, an object becomes JSON, a thrown error becomes `failure` and a log line.
@@ -78,13 +79,13 @@ await serveHttp({
 })
 ```
 
-`createHttpApp` gives an express app, `serveHttp` also listens on `PORT`. Routes:
+`createHttpApp` gives `{ handle, listener }` on `node:http` and web `Request`/`Response`, `serveHttp` also listens on `PORT`. Routes:
 
 - `POST /mcp` builds a new server and transport for every request. With `auth` it wants a Bearer token, other methods get 405.
 - `GET /health` answers `{ "ok": true }`.
 - OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` and `/authorize/callback`.
 - The pages from `publicDir`, `/x` serves `x.html`. A browser gets `404.html` for an unknown route and the `/error` page for a failure, `fetch` gets JSON.
-- `routes(app, context)` adds the service's own API.
+- `routes(request, context)` adds the service's own API: a `Response`, or `undefined` to pass the request on.
 
 `loadHttpConfig()` reads `PUBLIC_URL` (an origin, https outside loopback), `AUTH_SECRET` (at least 32 characters, `openssl rand -base64 48`), `PORT` (8080) and `ALLOWED_REDIRECT_URIS`. Claude's callbacks and loopback addresses are always allowed, the list adds to them.
 
@@ -96,14 +97,14 @@ OAuth rules:
 - `tokens: 'sign'` gives HS256 JWTs, `'encrypt'` gives JWEs. A sign-in that carries a third-party secret, like the token form, requires `encrypt`, so the secret is never readable from the token.
 - `memoryStore()` keeps clients and codes in memory, `sqliteStore(path)` in `node:sqlite`, so a deploy does not log anyone out. `store.revokeSubject(sub)` revokes everything issued to a person.
 
-Sign-in is a static page plus a `complete(req)` hook that tells who came back:
+Sign-in is a static page plus a `complete({ request, query, form })` hook that tells who came back:
 
 - `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
 - `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
 
 The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
 
-For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession` answers 401 without it, `sameOrigin` answers 403 to a foreign `Origin`, `sendJson` and `apiError` reply in one shape.
+For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession(sessions, request)` gives the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 to a foreign `Origin`, `sendJson` and `apiError` build responses in one shape.
 
 ## Pages
 
@@ -157,7 +158,7 @@ const client = await connectInMemory(createServer())
 
 await expectTools(client, ['search'])
 
-const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }).app)
+const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }))
 const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ token: 'good' }) })
 ```
 
@@ -176,7 +177,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: aimuzov/infra-mcp-kit/check@v2
+            - uses: aimuzov/infra-mcp-kit/check@v3
               with:
                   docker: deploy/Dockerfile
 ```
@@ -188,7 +189,7 @@ Both are composite actions: the job stays in the server, so the required `check`
 
 ## Releases
 
-release-please through [aimuzov/.github](https://github.com/aimuzov/.github) keeps a release PR. Merging it cuts a release, the checks run again and the `v2` major tag moves to it, so `check@v2` follows patches.
+release-please through [aimuzov/.github](https://github.com/aimuzov/.github) keeps a release PR. Merging it cuts a release, the checks run again and the `v3` major tag moves to it, so `check@v3` follows patches.
 
 Optional inputs of the action:
 
@@ -196,7 +197,22 @@ Optional inputs of the action:
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
 - `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
 
-A server that uses `/http` adds `@types/express` to its devDependencies: the kit's types refer to it, while an install without dev dependencies doesn't need it. The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+
+## Migrating from 2.x
+
+3.0 runs on [tmcp](https://github.com/paoloricciuti/tmcp) instead of the official SDK and on `node:http` instead of express. A hosted server's runtime goes from 27 MB in 98 packages to 12 MB in 15, 8 MB of it zod. Issued tokens and `auth.db` stay as they are: nobody has to reconnect.
+
+1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4. The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
+2. Imports: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` and the other result types come from `@aimuzov/infra-mcp-kit`. `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` and `server.server.elicitInput()` keep the SDK signatures.
+3. A thrown handler is a result with `isError`, as with `tool()`; the tool list keeps the input schema of the SDK.
+4. `createHttpApp` returns `{ handle, listener, context }`: `handle(request)` takes a `Request` and gives a `Response`, `listener` goes to `node:http`. `startHttp` takes the app itself, `.app` is gone.
+5. `routes(request, context)` returns a `Response` or `undefined` to pass the request on. `requireSession(sessions, request)` returns the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 or `undefined`. `sendJson(body, status, headers)` and `apiError(status, code, message)` return a `Response`. `sessions` gives `cookie(claims)` and `clearCookie()`, the values of `Set-Cookie`.
+6. A custom `Login.complete` gets `{ request, method, query, form }` instead of an express request: the kit has already read the form.
+7. `mountOAuth` is `oauthRouter` now, with `handle(request)` and `authenticate(request)`. Its errors are the kit's own `OAuthError` classes.
+8. CI: `aimuzov/infra-mcp-kit/check@v3`.
+
+Over HTTP a server still lives one request, as in 2.x: elicitation works over stdio only, progress comes in the SSE stream of the call.
 
 ## Migrating from 1.x
 

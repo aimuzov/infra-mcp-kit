@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { callbackUrl, readLoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
-import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js'
+
+import type { OAuthClient as OAuthClientInformationFull } from '#kit/http/oauth/errors'
 
 import { isAllowedRedirectUri, loadHttpConfig } from './config.ts'
 import { errorPage } from './json.ts'

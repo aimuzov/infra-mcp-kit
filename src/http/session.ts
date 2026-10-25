@@ -1,11 +1,9 @@
-import type { NextFunction, Request, Response } from 'express'
-
 import { isLoopback } from './config.ts'
 import { apiError } from './json.ts'
 import type { TokenClaims, Tokens } from './oauth/tokens.ts'
 
-export function readCookie(req: Request, name: string): string | undefined {
-	for (const part of (req.get('cookie') ?? '').split(';')) {
+export function readCookie(request: Request, name: string): string | undefined {
+	for (const part of (request.headers.get('cookie') ?? '').split(';')) {
 		const [key, ...rest] = part.trim().split('=')
 
 		if (key !== name) continue
@@ -22,36 +20,39 @@ export function readCookie(req: Request, name: string): string | undefined {
 }
 
 export type Sessions = {
-	read(req: Request): Promise<TokenClaims | null>
-	write(res: Response, claims: TokenClaims): Promise<void>
-	clear(res: Response): void
+	read(request: Request): Promise<TokenClaims | null>
+	/** Значение `Set-Cookie` с новой сессией. */
+	cookie(claims: TokenClaims): Promise<string>
+	/** Значение `Set-Cookie`, которое стирает сессию. */
+	clearCookie(): string
 }
 
-/** Cookie кабинета: подписанный токен `session`, httpOnly и SameSite=Lax. */
+/** Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax. */
 export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session'): Sessions {
-	const options = { httpOnly: true, secure: !isLoopback(publicUrl), sameSite: 'lax' as const, path: '/' }
+	const attributes = ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(isLoopback(publicUrl) ? [] : ['Secure'])].join('; ')
 
 	return {
-		async read(req) {
-			const token = readCookie(req, cookie)
+		async read(request) {
+			const token = readCookie(request, cookie)
 
 			return token ? tokens.verify('session', token) : null
 		},
-		async write(res, claims) {
-			res.cookie(cookie, await tokens.sign('session', claims), { ...options, maxAge: tokens.ttl.session * 1000 })
+		async cookie(claims) {
+			const value = encodeURIComponent(await tokens.sign('session', claims))
+
+			return `${cookie}=${value}; Max-Age=${tokens.ttl.session}; ${attributes}`
 		},
-		clear: (res) => void res.clearCookie(cookie, options),
+		clearCookie: () => `${cookie}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
 	}
 }
 
 /**
  * Формы кабинета меняют и удаляют данные, имея за спиной только cookie. SameSite=Lax уже
  * не пускает её на кросс-сайтовые POST, проверка Origin закрывает остальное.
+ * Чужой origin -- готовый ответ 403, свой -- `undefined`.
  */
-export function sameOrigin(publicUrl: URL) {
-	return (req: Request, res: Response, next: NextFunction) => {
-		if (req.get('origin') === publicUrl.origin) return next()
+export function sameOrigin(publicUrl: URL, request: Request): Response | undefined {
+	if (request.headers.get('origin') === publicUrl.origin) return undefined
 
-		apiError(res, 403, 'forbidden_origin', 'Запрос пришёл не со страницы сервиса')
-	}
+	return apiError(403, 'forbidden_origin', 'Запрос пришёл не со страницы сервиса')
 }

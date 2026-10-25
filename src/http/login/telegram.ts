@@ -1,5 +1,4 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { Request } from 'express'
 
 import { LoginError, type Login } from '#kit/http/oauth/provider'
 
@@ -73,12 +72,12 @@ export type TelegramLoginOptions = {
 
 /** Кто это по запросу: подпись виджета или, на localhost, dev-ссылка. */
 export function telegramUser(
-	req: Request,
+	query: Record<string, string>,
 	{ botToken, devUserId }: Pick<TelegramLoginOptions, 'botToken' | 'devUserId'>,
 ) {
-	if (devUserId && req.query.dev === '1') return { id: devUserId, firstName: 'dev', username: '' }
+	if (devUserId && query.dev === '1') return { id: devUserId, firstName: 'dev', username: '' }
 
-	return verifyTelegramLogin(req.query, botToken)
+	return verifyTelegramLogin(query, botToken)
 }
 
 /** Вход через Telegram Login Widget: виджет возвращает человека GET-ссылкой с подписанным query. */
@@ -101,12 +100,12 @@ export function telegramLogin(options: TelegramLoginOptions): Login {
 		page: options.page ?? '/login/telegram',
 		// Страница входа покажет dev-ссылку вместо виджета: на localhost виджет не работает.
 		context: options.devUserId ? { dev: options.devUserId } : undefined,
-		complete(req) {
-			const user = telegramUser(req, options)
+		complete({ query }) {
+			const user = telegramUser(query, options)
 
 			if (!user) throw new LoginError('Telegram не подтвердил вход, попробуй ещё раз')
 
-			const hash = typeof req.query.hash === 'string' ? req.query.hash : ''
+			const hash = query.hash ?? ''
 
 			if (hash && !spend(hash)) throw new LoginError('Эта ссылка входа уже использована, войди ещё раз')
 

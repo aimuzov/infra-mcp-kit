@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js'
+
+import type { OAuthClient } from './errors.ts'
 
 /** Код авторизации, который ждёт обмена на токены. */
 export type PendingCode = {
@@ -29,8 +30,8 @@ export type RefreshRecord = {
  * запись получает только один.
  */
 export type AuthStore = {
-	getClient(clientId: string): OAuthClientInformationFull | undefined
-	saveClient(client: OAuthClientInformationFull): void
+	getClient(clientId: string): OAuthClient | undefined
+	saveClient(client: OAuthClient): void
 	issueCode(pending: PendingCode, now?: number): string
 	/** Посмотреть код, не тратя его: SDK сначала сверяет PKCE. */
 	peekCode(code: string, now?: number): PendingCode | undefined
@@ -61,7 +62,7 @@ const newCode = () => randomBytes(32).toString('base64url')
  * Годится для тестов и сервисов без тома.
  */
 export function memoryStore(): AuthStore {
-	const clients = new Map<string, OAuthClientInformationFull>()
+	const clients = new Map<string, OAuthClient>()
 	const codes = new Map<string, PendingCode & { expiresAt: number }>()
 	const refresh = new Map<string, RefreshRecord>()
 	const revoked = new Map<string, number>()
@@ -210,7 +211,7 @@ export function sqliteStore(path: string): AuthStore {
 			const row = db.prepare('SELECT info FROM client WHERE client_id = ?').get(id) as
 				{ info: string } | undefined
 
-			return row ? (JSON.parse(row.info) as OAuthClientInformationFull) : undefined
+			return row ? (JSON.parse(row.info) as OAuthClient) : undefined
 		},
 		saveClient(client) {
 			db.prepare('INSERT OR REPLACE INTO client (client_id, info) VALUES (?, ?)').run(

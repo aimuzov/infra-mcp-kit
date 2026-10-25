@@ -27,15 +27,15 @@
 - [**Страницы**](#страницы): Astro-интеграция `mcpPages()` с лендингом, входом, страницами ошибки и 404 в стиле «Сигнал».
 - [**Тесты**](#тесты): клиенты в памяти и по HTTP и весь OAuth-поток для `node --test`.
 - [**Actions**](#actions) `check` и `publish` для workflow серверов.
-- [**Переезд с 1.x**](#переезд-с-1x).
+- [**Переезд с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
 
 ## Установка
 
 ```bash
-npm install -E github:aimuzov/infra-mcp-kit#v2.0.0
+npm install -E github:aimuzov/infra-mcp-kit#v3.0.0
 ```
 
-npm собирает пакет при установке, `prepare` запускает `tsc`. Peer-зависимость `@modelcontextprotocol/sdk` остаётся в сервере. Публикация в npm готова, но выключена, пока в репо не задана переменная `NPM_PUBLISH`.
+npm собирает пакет при установке, `prepare` запускает `tsc`. Peer-зависимость `zod` 4 остаётся в сервере, `@modelcontextprotocol/sdk` — только в его devDependencies для `/testing`. Публикация в npm готова, но выключена, пока в репо не задана переменная `NPM_PUBLISH`.
 
 ## Ядро
 
@@ -52,6 +52,7 @@ await runCli({
 })
 ```
 
+- `McpServer` — API SDK поверх tmcp: `registerTool`, `registerPrompt`, `registerResource` с `ResourceTemplate`, `server.server.elicitInput()`. Исключение в обработчике становится результатом с `isError`, `notifications/cancelled` обрывает `extra.signal`, версия протокола из каждого `initialize` пишется в лог. Под ним — сервер tmcp в `.tmcp`.
 - `runCli` обрабатывает `--help`, `--version`, `serve` (stdio, и без аргументов тоже), `serve --http` и собственные `commands` сервиса. Неизвестная команда печатает usage и выходит с кодом 2, любая ошибка печатается одной строкой `name: message` с кодом 1, стек — при `LOG_LEVEL=debug`.
 - `serveStdio(server, name)` подключает сервер к stdio.
 - `text`, `json` (обычный объект попадает и в `structuredContent`) и `failure` собирают результат инструмента. `tool(handler)` оборачивает обработчик: строка становится текстом, объект — JSON, брошенная ошибка — `failure` и строкой в логе.
@@ -78,13 +79,13 @@ await serveHttp({
 })
 ```
 
-`createHttpApp` отдаёт приложение express, `serveHttp` ещё и слушает `PORT`. Маршруты:
+`createHttpApp` отдаёт `{ handle, listener }` на `node:http` и веб-`Request`/`Response`, `serveHttp` ещё и слушает `PORT`. Маршруты:
 
 - `POST /mcp` создаёт новый сервер и транспорт на каждый запрос. С `auth` требует Bearer-токен, другие методы получают 405.
 - `GET /health` отвечает `{ "ok": true }`.
 - OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` и `/authorize/callback`.
 - Страницы из `publicDir`, `/x` отдаёт `x.html`. Браузер на неизвестный адрес получает `404.html`, при сбое — страницу `/error`, `fetch` получает JSON.
-- `routes(app, context)` добавляет собственное API сервиса.
+- `routes(request, context)` добавляет собственное API сервиса: `Response` или `undefined`, чтобы пропустить запрос дальше.
 
 `loadHttpConfig()` читает `PUBLIC_URL` (origin, https везде, кроме loopback), `AUTH_SECRET` (от 32 символов, `openssl rand -base64 48`), `PORT` (8080) и `ALLOWED_REDIRECT_URIS`. Колбэки Claude и loopback-адреса разрешены всегда, список добавляется к ним.
 
@@ -96,14 +97,14 @@ await serveHttp({
 - `tokens: 'sign'` выдаёт JWT HS256, `'encrypt'` — JWE. Вход, который несёт чужой секрет, как форма токена, требует `encrypt`: из токена секрет не прочитать.
 - `memoryStore()` держит клиентов и коды в памяти, `sqliteStore(path)` — в `node:sqlite`, поэтому деплой никого не разлогинивает. `store.revokeSubject(sub)` отзывает всё, что выдано человеку.
 
-Вход — это статическая страница и хук `complete(req)`, который говорит, кто вернулся:
+Вход — это статическая страница и хук `complete({ request, query, form })`, который говорит, кто вернулся:
 
 - `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
 - `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
 
 Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
 
-Для кабинета: `sessions(tokens, publicUrl)` даёт подписанную httpOnly-куку, `requireSession` без неё отвечает 401, `sameOrigin` отвечает 403 на чужой `Origin`, `sendJson` и `apiError` отвечают в одном формате.
+Для кабинета: `sessions(tokens, publicUrl)` даёт подписанную httpOnly-куку, `requireSession(sessions, request)` отдаёт сессию или `Response` 401, `sameOrigin(publicUrl, request)` — 403 на чужой `Origin`, `sendJson` и `apiError` собирают ответы в одном формате.
 
 ## Страницы
 
@@ -160,7 +161,7 @@ const client = await connectInMemory(createServer())
 
 await expectTools(client, ['search'])
 
-const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }).app)
+const { base } = await startHttp(() => createHttpApp({ ...options, publicDir: fakePages() }))
 const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ token: 'good' }) })
 ```
 
@@ -179,7 +180,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: aimuzov/infra-mcp-kit/check@v2
+            - uses: aimuzov/infra-mcp-kit/check@v3
               with:
                   docker: deploy/Dockerfile
 ```
@@ -191,7 +192,7 @@ jobs:
 
 ## Релизы
 
-release-please через [aimuzov/.github](https://github.com/aimuzov/.github) ведёт релизный PR. Его мёрж выпускает релиз, проверки проходят ещё раз, и мажорный тег `v2` переезжает на него, поэтому `check@v2` подхватывает патчи.
+release-please через [aimuzov/.github](https://github.com/aimuzov/.github) ведёт релизный PR. Его мёрж выпускает релиз, проверки проходят ещё раз, и мажорный тег `v3` переезжает на него, поэтому `check@v3` подхватывает патчи.
 
 Необязательные входы action:
 
@@ -199,9 +200,24 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 - `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
 - `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
 
-Сервер с `/http` держит `@types/express` в devDependencies: на него ссылаются типы кита, а установке без dev-зависимостей он не нужен. Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
+Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
 
-## Переезд с 1.x
+## Переезд с 2.x
+
+3.0 работает на [tmcp](https://github.com/paoloricciuti/tmcp) вместо официального SDK и на `node:http` вместо express. Рантайм размещённого сервера худеет с 27 МБ в 98 пакетах до 12 МБ в 15, из них 8 МБ — zod. Выданные токены и `auth.db` остаются как есть: переподключаться никому не придётся.
+
+1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4. SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
+2. Импорты: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` и другие типы результатов берутся из `@aimuzov/infra-mcp-kit`. У `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` и `server.server.elicitInput()` сигнатуры SDK.
+3. Исключение в обработчике — результат с `isError`, как у `tool()`; в списке инструментов схема входа та же, что у SDK.
+4. `createHttpApp` отдаёт `{ handle, listener, context }`: `handle(request)` принимает `Request` и отдаёт `Response`, `listener` идёт в `node:http`. `startHttp` принимает само приложение, `.app` больше нет.
+5. `routes(request, context)` отдаёт `Response` или `undefined`, чтобы пропустить запрос дальше. `requireSession(sessions, request)` отдаёт сессию или `Response` 401, `sameOrigin(publicUrl, request)` — 403 или `undefined`. `sendJson(body, status, headers)` и `apiError(status, code, message)` отдают `Response`. У `sessions` теперь `cookie(claims)` и `clearCookie()` — значения `Set-Cookie`.
+6. Свой `Login.complete` получает `{ request, method, query, form }` вместо запроса express: форму кит уже прочитал.
+7. `mountOAuth` теперь `oauthRouter` с `handle(request)` и `authenticate(request)`. Ошибки у него свои, классы `OAuthError` кита.
+8. CI: `aimuzov/infra-mcp-kit/check@v3`.
+
+По HTTP сервер по-прежнему живёт один запрос, как в 2.x: elicitation работает только по stdio, прогресс приходит в потоке SSE самого вызова.
+
+## Переезд с 1.x
 
 2.0 отказывается от HTML, который сервер рисовал на запрос: все страницы собирает Astro.
 

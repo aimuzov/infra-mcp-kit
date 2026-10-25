@@ -5,18 +5,17 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
+import { createServer, type RequestListener, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Client, type ClientOptions } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Express } from 'express'
 
+import type { HttpApp } from '#kit/http/app'
 import { signTelegramLogin } from '#kit/http/login/telegram'
+import type { CallToolResult, McpServer } from '#kit/mcp'
 
 /** Подпись входа как у Telegram, чтобы тест прошёл вход без виджета. */
 export { signTelegramLogin }
@@ -30,7 +29,7 @@ export async function connectInMemory(server: McpServer, options?: ClientOptions
 	const client = new Client({ name: 'test', version: '0.0.0' }, options)
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
 
-	await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+	await Promise.all([server.connect(serverTransport as never), client.connect(clientTransport)])
 
 	return client
 }
@@ -46,7 +45,7 @@ export async function expectTools(client: Client, names: string[]): Promise<void
 export function textOf(result: unknown): string {
 	return ((result as CallToolResult).content ?? [])
 		.filter((c) => c.type === 'text')
-		.map((c) => (c as { text: string }).text)
+		.map((c) => (c as unknown as { text: string }).text)
 		.join('\n')
 }
 
@@ -60,14 +59,18 @@ export type RunningHttp = {
  * Слушать случайный порт на 127.0.0.1. Приложение собирается после `listen`: ему нужен
  * публичный адрес, а порт известен только теперь.
  */
-export async function startHttp(build: (base: string) => Express | Promise<Express>): Promise<RunningHttp> {
+export async function startHttp(
+	build: (base: string) => HttpApp | RequestListener | Promise<HttpApp | RequestListener>,
+): Promise<RunningHttp> {
 	const server = createServer()
 
 	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
 
 	const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 
-	server.on('request', await build(base))
+	const app = await build(base)
+
+	server.on('request', typeof app === 'function' ? app : app.listener)
 
 	return {
 		base,

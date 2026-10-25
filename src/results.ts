@@ -1,6 +1,5 @@
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-
 import { log as defaultLog, type Logger } from './log.ts'
+import type { CallToolResult } from './mcp.ts'
 
 export const text = (value: string): CallToolResult => ({ content: [{ type: 'text', text: value }] })
 

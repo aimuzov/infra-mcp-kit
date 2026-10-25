@@ -6,10 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { after, describe, test } from 'node:test'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import express, { type Request } from 'express'
 import { EncryptJWT } from 'jose'
 
+import { McpServer } from '#kit/mcp'
 import {
 	connectHttp,
 	fakePages,
@@ -60,16 +59,15 @@ const running: RunningHttp[] = []
 after(() => Promise.all(running.map((r) => r.close())))
 
 async function start(store: AuthStore, extra: Partial<HttpAppOptions> = {}) {
-	const http = await startHttp(
-		(base) =>
-			createHttpApp({
-				config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
-				service,
-				createServer: server,
-				publicDir,
-				auth: { store, login: instantLogin({ subject: 'u1' }) },
-				...extra,
-			}).app,
+	const http = await startHttp((base) =>
+		createHttpApp({
+			config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
+			service,
+			createServer: server,
+			publicDir,
+			auth: { store, login: instantLogin({ subject: 'u1' }) },
+			...extra,
+		}),
 	)
 
 	running.push(http)
@@ -204,10 +202,10 @@ describe('вход и регистрация', () => {
 	test('подписанный вход Telegram годится один раз', async () => {
 		const login = telegramLogin({ botToken: '1:bot' })
 		const query = signTelegramLogin({ id: '7', auth_date: String(Math.floor(Date.now() / 1000)) }, '1:bot')
-		const req = { query } as unknown as Request
+		const input = { query, form: {}, method: 'GET', request: new Request('http://localhost/') }
 
-		assert.equal((await login.complete(req)).subject, '7')
-		await assert.rejects(async () => login.complete(req), LoginError)
+		assert.equal((await login.complete(input)).subject, '7')
+		await assert.rejects(async () => login.complete(input), LoginError)
 	})
 })
 
@@ -238,24 +236,23 @@ describe('конфиг и токены', () => {
 	})
 
 	test('битая cookie не роняет запрос', () => {
-		const req = { get: () => 'mcp_session=%E0%A4%A' } as unknown as Request
+		const request = new Request('http://localhost/', { headers: { cookie: 'mcp_session=%E0%A4%A' } })
 
-		assert.equal(readCookie(req, 'mcp_session'), undefined)
+		assert.equal(readCookie(request, 'mcp_session'), undefined)
 	})
 })
 
 describe('ошибки сервера', () => {
-	test('упавшая фабрика сервера даёт JSON-RPC 500, а не страницу express', async () => {
-		const http = await startHttp(
-			(base) =>
-				createHttpApp({
-					config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
-					service,
-					createServer: () => {
-						throw new Error('boom')
-					},
-					logger: { error() {}, warn() {}, info() {}, debug() {} },
-				}).app,
+	test('упавшая фабрика сервера даёт JSON-RPC 500, а не HTML-страницу', async () => {
+		const http = await startHttp((base) =>
+			createHttpApp({
+				config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
+				service,
+				createServer: () => {
+					throw new Error('boom')
+				},
+				logger: { error() {}, warn() {}, info() {}, debug() {} },
+			}),
 		)
 
 		running.push(http)
@@ -279,7 +276,7 @@ describe('ошибки сервера', () => {
 		const lines: string[] = []
 		const logger = { error() {}, warn() {}, debug() {}, info: (m: string) => void lines.push(m) }
 
-		await assert.rejects(listen(express(), port, 'up', logger), /EADDRINUSE/)
+		await assert.rejects(listen({ listener: () => {} } as never, port, 'up', logger), /EADDRINUSE/)
 		assert.deepEqual(lines, [])
 
 		busy.close()

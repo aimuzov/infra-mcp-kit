@@ -1,6 +1,5 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-
 import { parseLogLevel } from './log.ts'
+import type { McpServer } from './mcp.ts'
 import { messageOf } from './results.ts'
 import { serveStdio } from './stdio.ts'
 

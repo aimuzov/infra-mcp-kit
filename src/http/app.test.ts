@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, describe, test } from 'node:test'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
+import { McpServer } from '#kit/mcp'
 import {
 	connectHttp,
 	connectInMemory,
@@ -54,8 +54,8 @@ const running: RunningHttp[] = []
 after(() => Promise.all(running.map((r) => r.close())))
 
 async function start(options: Omit<HttpAppOptions, 'config' | 'service' | 'createServer'>) {
-	const http = await startHttp(
-		(base) => createHttpApp({ config: config(base), service, createServer: whoami, publicDir, ...options }).app,
+	const http = await startHttp((base) =>
+		createHttpApp({ config: config(base), service, createServer: whoami, publicDir, ...options }),
 	)
 
 	running.push(http)

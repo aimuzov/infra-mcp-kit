@@ -8,7 +8,7 @@ import test from 'node:test'
 import { pathToFileURL } from 'node:url'
 
 const cli = pathToFileURL(join(import.meta.dirname, 'cli.ts')).href
-const sdk = import.meta.resolve('@modelcontextprotocol/sdk/server/mcp.js')
+const mcp = pathToFileURL(join(import.meta.dirname, 'mcp.ts')).href
 
 /** Сервер на runCli в отдельном процессе: так его запускает клиент MCP. */
 function server(argv: string[] = []) {
@@ -16,7 +16,7 @@ function server(argv: string[] = []) {
 
 	writeFileSync(
 		file,
-		`import { McpServer } from '${sdk}'
+		`import { McpServer } from '${mcp}'
 import { runCli } from '${cli}'
 
 await runCli({

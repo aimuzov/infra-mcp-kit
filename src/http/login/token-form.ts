@@ -28,14 +28,13 @@ export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 	return {
 		sealsSecrets: true,
 		page: options.page ?? '/login',
-		async complete(req) {
-			if (req.method !== 'POST') throw new LoginError('Отправь форму ещё раз')
+		async complete({ method, form }) {
+			if (method !== 'POST') throw new LoginError('Отправь форму ещё раз')
 
-			const body = (req.body ?? {}) as Record<string, unknown>
 			const values: Record<string, string> = {}
 
 			for (const field of options.fields) {
-				const value = String(body[field.name] ?? '').trim()
+				const value = (form[field.name] ?? '').trim()
 
 				if (!value && field.required !== false) throw new LoginError(`Заполни поле «${field.label}»`)
 

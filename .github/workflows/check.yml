@@ -23,3 +23,15 @@ jobs:
       - uses: ./check
         with:
           smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/testing'].map((m) => import(m)))"
+      # Экраны UI в настоящем Chromium: CSP режет инлайн-код молча,
+      # это видно только в консоли браузера. Браузер кэшируется по версии
+      # Playwright, системные библиотеки ставятся из apt каждый прогон.
+      # Снимки не сравниваем: шрифты на раннере другие.
+      - id: playwright
+        run: echo "version=$(npm ls playwright --json | jq -r '.dependencies.playwright.version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui

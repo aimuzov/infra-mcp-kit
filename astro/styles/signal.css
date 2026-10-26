@@ -141,10 +141,10 @@ code {
 	color: inherit;
 	text-decoration: none;
 
-	& .brand__mark {
-		width: 30px;
-		height: 24px;
-		filter: drop-shadow(-1.5px 0 var(--signal-red)) drop-shadow(1.5px 0 var(--signal-cyan));
+	& .brand__icon {
+		width: 18px;
+		height: 18px;
+		color: var(--signal-hue);
 	}
 
 	& .brand__label {
@@ -407,11 +407,6 @@ h1 {
 
 	& .handshake__party--service {
 		color: var(--signal-hue);
-	}
-
-	& .handshake__mark {
-		width: 30px;
-		height: 24px;
 	}
 
 	& .handshake__logo {

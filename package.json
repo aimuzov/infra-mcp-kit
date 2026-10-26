@@ -75,7 +75,7 @@
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {
-		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#feature/i18n",
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.2.0",
 		"@astrojs/check": "0.9.10",
 		"@astrojs/svelte": "9.0.1",
 		"@lucide/svelte": "1.39.0",

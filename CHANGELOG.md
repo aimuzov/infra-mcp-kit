@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.2...v3.1.0) (2026-10-26)
+
+
+### Features
+
+* **astro:** let a tool chip carry a Lucide icon ([8180f77](https://github.com/aimuzov/infra-mcp-kit/commit/8180f77c2ffa5abcf7267e87caf02d2d4c8bf2a0))
+* **astro:** rework the connect block into a copy plate and tabs ([1ff4eed](https://github.com/aimuzov/infra-mcp-kit/commit/1ff4eed7440b06201078c34c59d8e53066e96653))
+* **astro:** show the service mark and tint the glitch in its colours ([11805c4](https://github.com/aimuzov/infra-mcp-kit/commit/11805c48763c6f5d95099f7e7db5e7c18f44cc7b))
+
+
+### Bug Fixes
+
+* **astro:** keep the author's mask for the footer and put a plug icon in the header ([f32dd42](https://github.com/aimuzov/infra-mcp-kit/commit/f32dd42b297fee1523165bc1b0b5d3db259d311f))
+
 ## [3.0.2](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.1...v3.0.2) (2026-10-25)
 
 

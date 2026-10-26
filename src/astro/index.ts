@@ -10,7 +10,8 @@ export type PagesService = {
 	/** Одна строка под именем на лендинге: что коннектор делает. */
 	tagline?: string
 	lead?: string
-	tools?: string[]
+	/** Чипы инструментов на лендинге: строка или подпись с иконкой Lucide. */
+	tools?: Array<string | PagesTool>
 	/** Цвет сервиса для светлой и тёмной темы, по умолчанию фиолетовый "Сигнала". */
 	accent?: { light: string; dark: string }
 	/** Цвета расслоения у заголовка и главной кнопки, по умолчанию красный и голубой. */
@@ -22,6 +23,12 @@ export type PagesService = {
 	logo?: string
 	/** Разметка знака из `logo`, её кладёт интеграция на сборке. */
 	logoSvg?: string
+}
+
+export type PagesTool = {
+	label: string
+	/** Имя иконки Lucide в kebab-case, как на lucide.dev: `kanban`, `list-checks`. */
+	icon?: string
 }
 
 export type TokenField = {

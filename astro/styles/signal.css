@@ -372,10 +372,18 @@ h1 {
 	list-style: none;
 
 	& li {
+		display: inline-flex;
+		gap: 6px;
+		align-items: center;
 		padding: 4px 10px;
 		border: 1px solid var(--signal-line);
 		border-radius: 6px;
 		font-size: 14px;
+	}
+
+	& .chips__icon {
+		flex: none;
+		color: var(--signal-hue);
 	}
 }
 

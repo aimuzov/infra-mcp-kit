@@ -224,6 +224,9 @@ describe('острова', () => {
 		const { page, context } = await open('/')
 
 		assert.equal(await page.locator('.hero__title .hero__logo svg').count(), 1)
+		// Иконка только у инструмента, где она задана: строка остаётся простым чипом.
+		assert.equal(await page.locator('.chips li', { hasText: 'whoami' }).locator('svg.lucide-user').count(), 1)
+		assert.equal(await page.locator('.chips li', { hasText: 'ping' }).locator('svg').count(), 0)
 
 		const glitch = await page.locator('.hero h1').evaluate((node) => ({
 			a: getComputedStyle(node, '::before').color,

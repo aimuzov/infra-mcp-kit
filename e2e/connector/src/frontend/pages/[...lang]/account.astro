@@ -1,0 +1,18 @@
+---
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
+
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+import { localePaths, pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+// Подчёркивание убирает остров из маршрутов, а соседство -- `../` из импорта.
+import Account from './_account.svelte'
+
+// Одна страница на все языки сервиса: `/account` и `/en/account`.
+export const getStaticPaths = localePaths
+
+const locale = localeOfPath(Astro.url.pathname)
+---
+
+<Layout title={pt(locale, 'fixture.accountTitle')} screen="account">
+	<Account client:load {locale} />
+</Layout>

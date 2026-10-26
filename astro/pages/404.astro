@@ -1,13 +1,17 @@
 ---
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
 import NotFound from '@aimuzov/infra-site-kit/not-found.astro'
 
 import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+const locale = localeOfPath(Astro.url.pathname)
 ---
 
 <!-- 404 общая с сайтами. Подсказок по sitemap нет: у коннектора две-три страницы. -->
-<Layout title="Такой страницы нет" screen="not-found">
+<Layout title={pt(locale, 'notFound.title')} screen="not-found">
 	<div class="missing">
-		<NotFound suggest={false} />
+		<NotFound suggest={false} {locale} />
 	</div>
 </Layout>
 

@@ -1,14 +1,30 @@
 ---
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
 import config from 'virtual:infra-mcp-kit/pages'
 
 import TokenForm from '@aimuzov/infra-mcp-kit/astro/components/token-form.svelte'
 import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+import { own, pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 
 const { service, tokenForm } = config
 
 if (!tokenForm) throw new Error('Страница /login без `tokenForm` в mcpPages')
+
+const locale = localeOfPath(Astro.url.pathname)
+// Тексты формы уходят в остров уже на языке страницы: словарь сервиса ему не нужен.
+const form = {
+	title: own(locale, 'tokenForm.title', tokenForm.title),
+	lead: own(locale, 'tokenForm.lead', tokenForm.lead),
+	submit: own(locale, 'tokenForm.submit', tokenForm.submit) ?? pt(locale, 'login.submit'),
+	fields: tokenForm.fields.map((field) => ({
+		...field,
+		label: own(locale, `field.${field.name}.label`, field.label),
+		placeholder: own(locale, `field.${field.name}.placeholder`, field.placeholder),
+		hint: own(locale, `field.${field.name}.hint`, field.hint),
+	})),
+}
 ---
 
-<Layout title={`Вход в ${service.name}`} screen="token">
-	<TokenForm client:load {...tokenForm} />
+<Layout title={pt(locale, 'login.title', { service: service.name })} screen="token">
+	<TokenForm client:load {...form} {locale} />
 </Layout>

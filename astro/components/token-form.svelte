@@ -7,11 +7,13 @@
 
 	import type { TokenField } from '@aimuzov/infra-mcp-kit/astro'
 	import Handshake from '@aimuzov/infra-mcp-kit/astro/components/handshake.svelte'
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 	import { readLoginContext, type LoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
 
-	type Props = { title: string; lead?: string; fields: TokenField[]; submit?: string }
+	/** Тексты уже на языке страницы: их выбирает login.astro по `locale`. */
+	type Props = { title: string; lead?: string; fields: TokenField[]; submit?: string; locale?: string }
 
-	let { title, lead, fields, submit = 'Подключить' }: Props = $props()
+	let { title, lead, fields, submit, locale = 'ru' }: Props = $props()
 
 	// До гидрации контекста нет: на сборке страница не знает, кто и откуда пришёл.
 	let context = $state<LoginContext | null>(null)
@@ -27,7 +29,9 @@
 		<h1>{title}</h1>
 		{#if context?.host}
 			<p class="muted">
-				Клиент {#if context.client}<b>{context.client}</b>{/if} с&nbsp;адреса <code>{context.host}</code>
+				{pt(locale, 'login.client')}
+				{#if context.client}<b>{context.client}</b>{/if}
+				{pt(locale, 'login.fromHost')} <code>{context.host}</code>
 			</p>
 		{/if}
 		{#if lead}<p class="muted">{lead}</p>{/if}
@@ -35,13 +39,13 @@
 			<Alert variant="danger">{context.error}</Alert>
 		{/if}
 		{#if context && !context.request}
-			<Alert variant="danger">Ссылка для входа неполная. Начни подключение заново из клиента.</Alert>
+			<Alert variant="danger">{pt(locale, 'login.broken')}</Alert>
 		{:else}
 			<!-- Запрос едет скрытым полем POST-формы, а не в query: в логи прокси он не попадёт. -->
 			<form class="form" method="post" action={context?.callback}>
 				<input type="hidden" name="request" value={context?.request ?? ''} />
 				{#each fields as field (field.name)}
-					<Field label={field.label} for={`field-${field.name}`} hint={field.hint}>
+					<Field label={field.label} for={`field-${field.name}`} hint={field.hint} {locale}>
 						<Input
 							id={`field-${field.name}`}
 							name={field.name}
@@ -52,9 +56,9 @@
 						/>
 					</Field>
 				{/each}
-				<Button type="submit" size="xl" disabled={!context}>{submit}</Button>
+				<Button type="submit" size="xl" disabled={!context}>{submit ?? pt(locale, 'login.submit')}</Button>
 			</form>
 		{/if}
-		<p class="hint hint--center">Если ты не начинал подключение сам, просто закрой страницу.</p>
+		<p class="hint hint--center">{pt(locale, 'login.ignore')}</p>
 	</Card>
 </div>

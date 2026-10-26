@@ -33,6 +33,10 @@
 			"types": "./build/testing/index.d.ts",
 			"default": "./build/testing/index.js"
 		},
+		"./i18n": {
+			"types": "./build/i18n.d.ts",
+			"default": "./build/i18n.js"
+		},
 		"./astro": {
 			"types": "./build/astro/index.d.ts",
 			"default": "./build/astro/index.js"
@@ -66,12 +70,12 @@
 		"tmcp": "1.20.0"
 	},
 	"peerDependencies": {
+		"@lucide/svelte": "^1.39.0",
 		"@modelcontextprotocol/sdk": "^1.32.0",
-		"zod": "^4.0.0",
-		"@lucide/svelte": "^1.39.0"
+		"zod": "^4.0.0"
 	},
 	"devDependencies": {
-		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#v4.1.2",
+		"@aimuzov/infra-site-kit": "github:aimuzov/infra-site-kit#feature/i18n",
 		"@astrojs/check": "0.9.10",
 		"@astrojs/svelte": "9.0.1",
 		"@lucide/svelte": "1.39.0",

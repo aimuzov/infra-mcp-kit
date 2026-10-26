@@ -50,7 +50,8 @@ before(async () => {
 				login: tokenFormLogin({
 					fields: [{ name: 'token', label: 'API-токен' }],
 					verify: ({ token }) => {
-						if (token !== 'good') throw new LoginError('Токен не подошёл')
+						if (token !== 'good')
+							throw new LoginError({ ru: 'Токен не подошёл', en: 'The token did not fit' })
 
 						return { subject: 'user-1', claims: { apiToken: token } }
 					},
@@ -292,6 +293,128 @@ describe('острова', () => {
 	})
 })
 
+describe('языки', () => {
+	test('английские страницы: lang, тексты кита и сервиса, подпись автора', async () => {
+		const { page, context } = await open('/en/')
+
+		assert.equal(await page.locator('html').getAttribute('lang'), 'en')
+		assert.equal(await page.locator('.brand__label').innerText(), 'MCP connector')
+		assert.match(await page.locator('.tagline').innerText(), /A check of the kit pages/)
+		assert.match(await page.locator('main').innerText(), /tools/i)
+		assert.match(await page.locator('main').innerText(), /ping/)
+		assert.match(await page.locator('footer').innerText(), /Source code/)
+		await context.close()
+
+		const ru = await open('/')
+
+		assert.equal(await ru.page.locator('html').getAttribute('lang'), 'ru')
+		assert.equal(await ru.page.locator('.brand__label').innerText(), 'MCP-коннектор')
+		await ru.context.close()
+	})
+
+	test('hreflang и canonical указывают на обе версии', async () => {
+		const { page, context } = await open('/en/login')
+		const links = await page
+			.locator('link[rel="alternate"]')
+			.evaluateAll((els) =>
+				els.map((el) => [el.getAttribute('hreflang'), new URL(el.getAttribute('href') ?? '').pathname]),
+			)
+
+		assert.deepEqual(links, [
+			['ru', '/login'],
+			['en', '/en/login'],
+			['x-default', '/login'],
+		])
+
+		assert.equal(
+			new URL((await page.locator('link[rel="canonical"]').getAttribute('href')) ?? '').pathname,
+			'/en/login',
+		)
+
+		await context.close()
+	})
+
+	test('переключатель ведёт на ту же страницу и запоминает выбор', async () => {
+		const { page, context } = await open('/account')
+
+		await page.locator('a.lang').click()
+		await page.waitForURL(/\/en\/account$/)
+		// Экран входа рисует остров после запроса состояния, его и ждём.
+		await page.getByRole('heading', { name: 'Sign in first' }).waitFor()
+
+		// Выбор в cookie сильнее Accept-Language: русская ссылка теперь ведёт на английскую.
+		await page.goto(new URL('/login', http.base).href)
+		assert.equal(new URL(page.url()).pathname, '/en/login')
+
+		await page.locator('a.lang').click()
+		await page.waitForURL(/\/login$/)
+		assert.equal(await page.locator('html').getAttribute('lang'), 'ru')
+		await context.close()
+	})
+
+	test('первый заход по Accept-Language уводит на английскую версию, фрагмент на месте', async () => {
+		const res = await fetch(new URL('/login?x=1', http.base), {
+			redirect: 'manual',
+			headers: { accept: 'text/html', 'accept-language': 'en-US,en;q=0.9' },
+		})
+
+		assert.equal(res.status, 302)
+		assert.equal(res.headers.get('location'), '/en/login?x=1')
+
+		const ru = await fetch(new URL('/login', http.base), {
+			redirect: 'manual',
+			headers: { accept: 'text/html', 'accept-language': 'ru-RU,ru;q=0.9,en;q=0.5' },
+		})
+
+		assert.equal(ru.status, 200)
+
+		// Без cookie ссылку на /en/ не трогаем, а JSON и API не редиректим вовсе.
+		const en = await fetch(new URL('/en/login', http.base), {
+			redirect: 'manual',
+			headers: { accept: 'text/html', 'accept-language': 'ru' },
+		})
+
+		assert.equal(en.status, 200)
+
+		const api = await fetch(new URL('/account/state', http.base), {
+			headers: { accept: 'application/json', 'accept-language': 'en' },
+		})
+
+		assert.equal(api.status, 401)
+
+		const { url } = await authorize()
+		const context = await browser.newContext({ locale: 'en-US' })
+		const page = await context.newPage()
+
+		await page.goto(url)
+		await page.waitForLoadState('networkidle')
+		assert.equal(new URL(page.url()).pathname, '/en/login')
+		assert.match(await page.locator('main').innerText(), /A client|Client/)
+		assert.equal(await page.locator('button[type="submit"]').innerText(), 'Connect')
+		await context.close()
+	})
+
+	test('ошибка входа на английской странице приходит по-английски', async () => {
+		const { url } = await authorize()
+		const context = await browser.newContext({ locale: 'en-US' })
+		const page = await context.newPage()
+
+		await page.goto(url)
+		await page.locator('input[name="token"]').fill('bad')
+		await page.locator('button[type="submit"]').click()
+		await page.waitForURL(/\/en\/login/)
+		assert.match(await page.locator('main').innerText(), /The token did not fit/)
+		await context.close()
+	})
+
+	test('английская 404', async () => {
+		const { page, context } = await open('/en/nope')
+
+		assert.match(await page.locator('h1').innerText(), /There is no such page/)
+		await context.close()
+	})
+})
+
 describe('скриншоты', () => {
 	test('все экраны в обеих темах на телефоне и десктопе, без нарушений CSP и ошибок JS', async () => {
 		const { url: login } = await authorize()
@@ -306,6 +429,15 @@ describe('скриншоты', () => {
 			'not-found': ['/nope'],
 			'account-guest': ['/account'],
 			account: ['/account', { cookie: true }],
+			'en.landing': ['/en/'],
+			'en.login': [login.replace('/login', '/en/login')],
+			'en.telegram': [`/en${telegram}`],
+			'en.error': [
+				'/en/error?code=invalid_request&title=The sign-in link has expired&message=Start connecting again from the client.',
+			],
+			'en.not-found': ['/en/nope'],
+			'en.account-guest': ['/en/account'],
+			'en.account': ['/en/account', { cookie: true }],
 		}
 
 		for (const [name, [path, options]] of Object.entries(screens)) {

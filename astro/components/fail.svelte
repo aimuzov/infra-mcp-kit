@@ -1,9 +1,11 @@
 <script lang="ts">
 	import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
 
-	type Props = { code?: string; title?: string; message?: string }
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 
-	let { code = 'error', title = 'Что-то пошло не так', message = '' }: Props = $props()
+	type Props = { code?: string; title?: string; message?: string; locale?: string }
+
+	let { code = 'error', locale = 'ru', title = pt(locale, 'error.default'), message = '' }: Props = $props()
 
 	// Сервер шлёт сюда редиректом с `?code=&title=&message=`. Svelte вставляет их текстом,
 	// поэтому разметка из ссылки страницу не изменит.
@@ -25,6 +27,6 @@
 		<p class="fail__code glitch" data-text={shown.code}>{shown.code}</p>
 		<h1>{shown.title}</h1>
 		{#if shown.message}<p class="muted">{shown.message}</p>{/if}
-		<p><a href="/">На главную</a></p>
+		<p><a href={locale === 'ru' ? '/' : `/${locale}/`}>{pt(locale, 'notFound.home')}</a></p>
 	</Card>
 </div>

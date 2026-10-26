@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.1.0...v3.2.0) (2026-10-26)
+
+
+### Features
+
+* build connector pages in Russian and English with a language switch ([5cd5cfd](https://github.com/aimuzov/infra-mcp-kit/commit/5cd5cfd2c6ad6512f28940ea986dd894a2dbd886))
+* build connector pages in Russian and English with a language switch ([e24155b](https://github.com/aimuzov/infra-mcp-kit/commit/e24155b5e3a1d57020db6b81f0fd213849cc16af))
+
 ## [3.1.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.0.2...v3.1.0) (2026-10-26)
 
 

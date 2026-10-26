@@ -4,13 +4,16 @@
 
 	/** Тот же ключ, что у `ThemeBoot` в layout: выбор переживает перезагрузку. */
 	const KEY = 'mcp:theme'
+
+	/** Подпись кнопки для читалки на языке страницы. */
+	let { label = 'Сменить тему' }: { label?: string } = $props()
 </script>
 
 <!-- Круг theme-peek показывает другую тему вокруг кнопки ещё до клика, как на сайтах. -->
 <button
 	class="theme"
 	type="button"
-	aria-label="Сменить тему"
+	aria-label={label}
 	onclick={() => toggleTheme({ key: KEY })}
 	{@attach (node) => themePeek(node)}
 >

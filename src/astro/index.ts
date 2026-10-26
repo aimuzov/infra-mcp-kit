@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import type { AstroIntegration } from 'astro'
 
+import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
+
+export type { Locale, Strings } from '#kit/i18n'
+
 /** Что знают страницы кита о сервисе на сборке. */
 export type PagesService = {
 	/** Короткое имя в шапке и заголовках, например `thinks`. */
@@ -23,6 +27,14 @@ export type PagesService = {
 	logo?: string
 	/** Разметка знака из `logo`, её кладёт интеграция на сборке. */
 	logoSvg?: string
+	/**
+	 * Свои строки сервиса по языкам. Свои страницы берут их через `pt(locale, key)`, а
+	 * переводы полей конфига кит ищет по ключам: `service.tagline`, `service.lead`,
+	 * `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`,
+	 * `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`.
+	 * Нет перевода -- поле показывается как в конфиге.
+	 */
+	strings?: Strings
 }
 
 export type PagesTool = {
@@ -49,6 +61,11 @@ export type McpPagesOptions = {
 	telegram?: { botName: string; grants?: string[] }
 	/** Страницы кита, которые сервис рисует сам, например свой лендинг. */
 	override?: Array<'index' | 'error' | '404'>
+	/**
+	 * Языки страниц. По умолчанию только `ru`; с `en` кит собирает английские страницы
+	 * под `/en/`, ставит переключатель и `hreflang`, а сервер подбирает язык по `Accept-Language`.
+	 */
+	locales?: Locale[]
 }
 
 export const VIRTUAL_MODULE = 'virtual:infra-mcp-kit/pages'
@@ -130,8 +147,19 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 					['/404', '404.astro', !skip.has('404')],
 				]
 
-				for (const [pattern, file, on] of routes) {
-					if (on) injectRoute({ pattern, entrypoint: page(file), prerender: true })
+				const locales = options.locales ?? [DEFAULT_LOCALE]
+
+				for (const locale of locales) {
+					const prefix = locale === DEFAULT_LOCALE ? '' : `/${locale}`
+
+					for (const [pattern, file, on] of routes) {
+						if (on)
+							injectRoute({
+								pattern: pattern === '/' ? prefix || '/' : prefix + pattern,
+								entrypoint: page(file),
+								prerender: true,
+							})
+					}
 				}
 
 				updateConfig({

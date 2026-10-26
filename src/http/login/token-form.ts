@@ -1,9 +1,10 @@
 import { LoginError, type Grant, type Login } from '#kit/http/oauth/provider'
+import { allLocales, pick, type Localized } from '#kit/i18n'
 
 /** Поле формы, как его описывает `mcpPages({ tokenForm })`: серверу нужны имя и подпись. */
 export type TokenFormField = {
 	name: string
-	label: string
+	label: Localized
 	required?: boolean
 }
 
@@ -29,14 +30,18 @@ export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 		sealsSecrets: true,
 		page: options.page ?? '/login',
 		async complete({ method, form }) {
-			if (method !== 'POST') throw new LoginError('Отправь форму ещё раз')
+			if (method !== 'POST') throw new LoginError(allLocales('login.resend'))
 
 			const values: Record<string, string> = {}
 
 			for (const field of options.fields) {
 				const value = (form[field.name] ?? '').trim()
 
-				if (!value && field.required !== false) throw new LoginError(`Заполни поле «${field.label}»`)
+				if (!value && field.required !== false)
+					throw new LoginError({
+						ru: allLocales('login.required', { field: pick(field.label, 'ru') ?? field.name }).ru,
+						en: allLocales('login.required', { field: pick(field.label, 'en') ?? field.name }).en,
+					})
 
 				values[field.name] = value
 			}

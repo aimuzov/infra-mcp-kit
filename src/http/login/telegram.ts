@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import { LoginError, type Login } from '#kit/http/oauth/provider'
+import { allLocales } from '#kit/i18n'
 
 /** Поля, которые Telegram Login Widget дописывает к auth URL. */
 export type TelegramUser = {
@@ -103,11 +104,11 @@ export function telegramLogin(options: TelegramLoginOptions): Login {
 		complete({ query }) {
 			const user = telegramUser(query, options)
 
-			if (!user) throw new LoginError('Telegram не подтвердил вход, попробуй ещё раз')
+			if (!user) throw new LoginError(allLocales('login.telegramFailed'))
 
 			const hash = query.hash ?? ''
 
-			if (hash && !spend(hash)) throw new LoginError('Эта ссылка входа уже использована, войди ещё раз')
+			if (hash && !spend(hash)) throw new LoginError(allLocales('login.linkUsed'))
 
 			return { subject: user.id, claims: options.claims?.(user) }
 		},

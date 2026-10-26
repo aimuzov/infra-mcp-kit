@@ -145,6 +145,16 @@ export default defineConfig({
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
+### Языки
+
+С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
+
+Английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
+
+Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
+
+При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Переключатель запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+
 ## Тесты
 
 ```ts

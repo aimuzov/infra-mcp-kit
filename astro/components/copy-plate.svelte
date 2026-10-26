@@ -2,8 +2,15 @@
 	import Check from '@lucide/svelte/icons/check'
 	import Copy from '@lucide/svelte/icons/copy'
 
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
 	/** Строка на плашке и что про неё сказать читалке. */
-	let { value, label, small = false }: { value: string; label: string; small?: boolean } = $props()
+	let {
+		value,
+		label,
+		small = false,
+		locale = 'ru',
+	}: { value: string; label: string; small?: boolean; locale?: string } = $props()
 
 	let copied = $state(false)
 	let timer: ReturnType<typeof setTimeout> | undefined
@@ -28,13 +35,13 @@
 	<button
 		type="button"
 		class={['plate__copy', copied && 'plate__copy--done']}
-		aria-label={copied ? 'Скопировано' : `Скопировать ${label}`}
-		title={copied ? 'Скопировано' : 'Скопировать'}
+		aria-label={copied ? pt(locale, 'copy.copied') : `${pt(locale, 'copy.copy')} ${label}`}
+		title={copied ? pt(locale, 'copy.copied') : pt(locale, 'copy.copy')}
 		onclick={copy}
 	>
 		{#if copied}<Check size={17} />{:else}<Copy size={17} />{/if}
 	</button>
-	<span class="plate__status" role="status">{copied ? 'Скопировано' : ''}</span>
+	<span class="plate__status" role="status">{copied ? pt(locale, 'copy.copied') : ''}</span>
 </div>
 
 <style>

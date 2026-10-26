@@ -3,11 +3,12 @@
 	import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
 
 	import Handshake from '@aimuzov/infra-mcp-kit/astro/components/handshake.svelte'
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 	import { callbackUrl, readLoginContext, type LoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
 
-	type Props = { service: string; botName: string; grants?: string[] }
+	type Props = { service: string; botName: string; grants?: string[]; locale?: string }
 
-	let { service, botName, grants = [] }: Props = $props()
+	let { service, botName, grants = [], locale = 'ru' }: Props = $props()
 
 	let context = $state<LoginContext | null>(null)
 	let widget = $state<HTMLElement>()
@@ -47,9 +48,9 @@
 <div class="auth">
 	<Card>
 		<Handshake client={context?.client || context?.host} />
-		<h1>{context?.client || 'Клиент'} просит доступ к&nbsp;{service}</h1>
+		<h1>{pt(locale, 'login.asks', { client: context?.client || pt(locale, 'login.client'), service })}</h1>
 		{#if context?.host}
-			<p class="muted">Клиент с&nbsp;адреса <code>{context.host}</code></p>
+			<p class="muted">{pt(locale, 'login.clientFromHost')} <code>{context.host}</code></p>
 		{/if}
 		{#if context?.error}
 			<Alert variant="danger">{context.error}</Alert>
@@ -60,13 +61,13 @@
 			</ul>
 		{/if}
 		{#if context && !context.request}
-			<Alert variant="danger">Ссылка для входа неполная. Начни подключение заново из клиента.</Alert>
+			<Alert variant="danger">{pt(locale, 'login.broken')}</Alert>
 		{:else if devUrl}
-			<a class="telegram__dev" href={devUrl}>Войти как {context?.dev} (dev)</a>
+			<a class="telegram__dev" href={devUrl}>{pt(locale, 'login.dev', { id: context?.dev ?? '' })}</a>
 		{:else}
 			<div class="telegram" bind:this={widget}></div>
 		{/if}
-		<p class="hint hint--center">Если ты не начинал подключение сам, просто закрой страницу.</p>
+		<p class="hint hint--center">{pt(locale, 'login.ignore')}</p>
 	</Card>
 </div>
 

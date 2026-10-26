@@ -2,8 +2,9 @@
 	import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
 
 	import CopyPlate from '@aimuzov/infra-mcp-kit/astro/components/copy-plate.svelte'
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 
-	let { name }: { name: string } = $props()
+	let { name, locale = 'ru' }: { name: string; locale?: string } = $props()
 
 	// Адрес известен только в браузере: статика не знает, на каком домене её раздают.
 	let url = $state('')
@@ -13,7 +14,7 @@
 	})
 
 	const TABS = [
-		{ id: 'app', title: 'claude.ai и Desktop' },
+		{ id: 'app', title: pt(locale, 'connect.tabApp') },
 		{ id: 'code', title: 'Claude Code' },
 	] as const
 
@@ -41,11 +42,11 @@
 </script>
 
 <Card>
-	<h2 class="section-title">Подключить</h2>
+	<h2 class="section-title">{pt(locale, 'connect.title')}</h2>
 	<!-- Плашку рисуем и на сборке, с заглушкой: Astro вшивает CSS только тех компонентов,
 	     что попали в статику, а стили отрисованных в браузере теряются. -->
-	<div class="connect__url"><CopyPlate value={shown} label="адрес коннектора" /></div>
-	<div class="tabs" role="tablist" aria-label="Где подключить">
+	<div class="connect__url"><CopyPlate value={shown} label={pt(locale, 'connect.urlLabel')} {locale} /></div>
+	<div class="tabs" role="tablist" aria-label={pt(locale, 'connect.where')}>
 		{#each TABS as tab, i (tab.id)}
 			<button
 				id={`connect-tab-${tab.id}`}
@@ -65,12 +66,12 @@
 	<div id="connect-panel-app" class="panel" role="tabpanel" aria-labelledby="connect-tab-app" hidden={active !== 0}>
 		<ol>
 			<li>Settings → Connectors → Add custom connector.</li>
-			<li>Вставь адрес и войди.</li>
+			<li>{pt(locale, 'connect.appPaste')}</li>
 		</ol>
 	</div>
 	<div id="connect-panel-code" class="panel" role="tabpanel" aria-labelledby="connect-tab-code" hidden={active !== 1}>
-		<p>Выполни в терминале, затем <code>/mcp</code> для входа:</p>
-		<CopyPlate value={command} label="команду" small />
+		<p>{pt(locale, 'connect.codeBefore')} <code>/mcp</code> {pt(locale, 'connect.codeAfter')}</p>
+		<CopyPlate value={command} label={pt(locale, 'connect.command')} {locale} small />
 	</div>
 </Card>
 

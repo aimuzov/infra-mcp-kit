@@ -142,6 +142,16 @@ export default defineConfig({
 
 [`e2e/connector`](e2e/connector) is a working example.
 
+### Languages
+
+With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
+
+English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
+
+A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
+
+On the first visit the server sends a person whose browser prefers English to `/en/...`. The switch remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
+
 ## Testing
 
 ```ts

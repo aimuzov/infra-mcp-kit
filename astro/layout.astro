@@ -2,10 +2,14 @@
 // Общий каркас страниц коннектора. Тема, база корня, компоненты и подпись автора -- из
 // infra-site-kit, как у сайтов: "Сигнал" только переназначает их токены на свою палитру.
 import Credit from '@aimuzov/infra-site-kit/credit.astro'
+import { localeOfPath, localizePath } from '@aimuzov/infra-site-kit/i18n.js'
+import I18nHead from '@aimuzov/infra-site-kit/i18n-head.astro'
 import ThemeBoot from '@aimuzov/infra-site-kit/theme-boot.astro'
+import LangSwitch from '@aimuzov/infra-site-kit/ui/lang-switch.svelte'
 import config from 'virtual:infra-mcp-kit/pages'
 
 import ThemeToggle from '@aimuzov/infra-mcp-kit/astro/components/theme-toggle.svelte'
+import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 
 import '@aimuzov/infra-site-kit/base.css'
 import '@aimuzov/infra-site-kit/ui/tokens.css'
@@ -21,22 +25,26 @@ type Props = {
 
 const { title, screen = 'page' } = Astro.props
 const { service } = config
+const locale = localeOfPath(Astro.url.pathname)
+// Переключатель и `hreflang` -- только когда у сервиса больше одного языка.
+const multilingual = (config.locales?.length ?? 1) > 1
 ---
 
 <!doctype html>
-<html lang="ru" data-screen={screen}>
+<html lang={locale} data-screen={screen}>
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width,initial-scale=1" />
 		<meta name="color-scheme" content="light dark" />
 		<title>{title}</title>
 		<ThemeBoot key="mcp:theme" />
+		{multilingual && <I18nHead />}
 		<slot name="head" />
 	</head>
 	<body>
 		<div class="shell">
 			<header class="top">
-				<a class="brand" href="/">
+				<a class="brand" href={localizePath('/', locale)}>
 					<!-- Вилка из Lucide (ISC). Маска автора -- пасхалка подписи в футере и 404, не логотип. -->
 					<svg
 						class="brand__icon"
@@ -53,15 +61,18 @@ const { service } = config
 						<path d="M15 8V2"></path>
 						<path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path>
 					</svg>
-					<span class="brand__label">MCP-коннектор</span>
+					<span class="brand__label">{pt(locale, 'brand.label')}</span>
 				</a>
-				<ThemeToggle client:load />
+				<div class="top__actions">
+					{multilingual && <LangSwitch client:load {locale} path={Astro.url.pathname} />}
+					<ThemeToggle client:load label={pt(locale, 'theme.toggle')} />
+				</div>
 			</header>
 			<main class="main">
 				<slot />
 			</main>
 			<footer class="foot">
-				<Credit repo={service.repo} />
+				<Credit repo={service.repo} {locale} />
 			</footer>
 		</div>
 	</body>

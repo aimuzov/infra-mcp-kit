@@ -5,6 +5,8 @@
 	import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
 	import Skeleton from '@aimuzov/infra-site-kit/ui/skeleton.svelte'
 
+	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
 	type Props = {
 		/** Откуда брать состояние кабинета. 401 -- человек не вошёл. */
 		src?: string
@@ -12,13 +14,16 @@
 		login?: string
 		/** Абзац на экране входа: что человек найдёт в кабинете. */
 		guest?: string
+		/** Язык текстов каркаса. */
+		locale?: string
 		children: Snippet<[T, () => Promise<void>]>
 	}
 
 	let {
 		src = '/account/state',
 		login = '/account/login',
-		guest = 'Войди, чтобы увидеть свои данные.',
+		locale = 'ru',
+		guest = pt(locale, 'account.guest'),
 		children,
 	}: Props = $props()
 
@@ -39,7 +44,7 @@
 
 <!-- Каркас кабинета: загрузка, вход и ошибка общие, данные рисует сервис сниппетом. -->
 {#if state.kind === 'loading'}
-	<div class="account__loading" role="status" aria-label="Загружаем кабинет">
+	<div class="account__loading" role="status" aria-label={pt(locale, 'account.loading')}>
 		<Skeleton width="6rem" height="0.75rem" />
 		<Skeleton width="60%" height="2.5rem" />
 		<Card>
@@ -51,18 +56,18 @@
 {:else if state.kind === 'guest'}
 	<div class="auth">
 		<Card>
-			<p class="eyebrow">Кабинет</p>
-			<h1>Нужно войти</h1>
+			<p class="eyebrow">{pt(locale, 'account.eyebrow')}</p>
+			<h1>{pt(locale, 'account.needLogin')}</h1>
 			<p class="muted">{guest}</p>
-			<a class="account__login" href={login}>Войти</a>
+			<a class="account__login" href={login}>{pt(locale, 'account.login')}</a>
 		</Card>
 	</div>
 {:else if state.kind === 'error'}
-	<Alert variant="danger" title="Кабинет не загрузился">Обнови страницу или зайди чуть позже.</Alert>
+	<Alert variant="danger" title={pt(locale, 'account.failTitle')}>{pt(locale, 'account.failText')}</Alert>
 {:else}
 	<header class="hero hero--small">
-		<p class="eyebrow">Кабинет</p>
-		<h1>Привет, {state.data.name}</h1>
+		<p class="eyebrow">{pt(locale, 'account.eyebrow')}</p>
+		<h1>{pt(locale, 'account.hello', { name: state.data.name })}</h1>
 	</header>
 	{@render children(state.data, load)}
 {/if}

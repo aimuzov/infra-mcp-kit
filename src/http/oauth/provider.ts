@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { isAllowedRedirectUri } from '#kit/http/config'
+import { localizePath, pick, type Localized } from '#kit/i18n'
 import type { AuthInfo } from '#kit/mcp'
 
 import {
@@ -38,7 +39,23 @@ export type AuthorizationParams = {
 }
 
 /** Ошибка входа, которую стоит показать человеку на той же странице. */
-export class LoginError extends Error {}
+/**
+ * Ошибка входа, которую человек увидит на странице входа. Текст -- строкой или по языкам:
+ * `new LoginError({ ru: 'Токен не подошёл', en: 'The token did not fit' })`.
+ */
+export class LoginError extends Error {
+	readonly texts: Localized
+
+	constructor(text: Localized) {
+		super(pick(text, 'ru') ?? '')
+		this.texts = text
+	}
+
+	/** Текст на языке страницы, без перевода -- по-русски. */
+	in(locale: string): string {
+		return pick(this.texts, locale) ?? this.message
+	}
+}
 
 /**
  * Способ входа, который подключает сервис. Протокол, PKCE, коды и токены остаются на ките,
@@ -134,7 +151,7 @@ export class KitOAuthProvider {
 	}
 
 	/** Адрес статической страницы входа с контекстом во фрагменте. */
-	loginPage(request: string, client: OAuthClient, redirectUri: string, error?: string): string {
+	loginPage(request: string, client: OAuthClient, redirectUri: string, error?: string, locale = 'ru'): string {
 		const { page, context } = this.options.login
 		const hash = new URLSearchParams({
 			...context,
@@ -146,7 +163,7 @@ export class KitOAuthProvider {
 
 		if (error) hash.set('error', error)
 
-		return `${page}#${hash}`
+		return `${localizePath(page, locale)}#${hash}`
 	}
 
 	/** Выдать код по завершённому входу. Отдаёт адрес, куда редиректить. */

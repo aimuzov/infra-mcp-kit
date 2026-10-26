@@ -1,8 +1,21 @@
+import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from 'node:http'
 import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 
+import {
+	cookieLocale,
+	DEFAULT_LOCALE,
+	enabledLocales,
+	enableLocales,
+	kt,
+	localeOfPath,
+	localizePath,
+	negotiateLocale,
+	requestLocale,
+	type Locale,
+} from '#kit/i18n'
 import { log as defaultLog, type Logger } from '#kit/log'
 import type { AuthInfo, McpServer } from '#kit/mcp'
 import { messageOf } from '#kit/results'
@@ -109,6 +122,9 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			: new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href, mode: auth?.tokens ?? 'sign' })
 	const context: HttpContext = { config, service, mcpUrl, tokens, logger }
 
+	// Английские страницы mcpPages кладёт в `en/`: нет каталога -- сервер говорит только по-русски.
+	if (publicDir) enableLocales(existsSync(join(publicDir, 'en')) ? ['ru', 'en'] : ['ru'])
+
 	if (auth && !publicDir) {
 		throw new Error('Вход показывает статическую страницу: с `auth` нужен `publicDir` со сборкой mcpPages')
 	}
@@ -172,6 +188,16 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 
 		if (pathname === '/mcp') return mcp(request)
 
+		if (publicDir && wantsPage(request)) {
+			const target = await languageRedirect(publicDir, request)
+
+			if (target)
+				return new Response(null, {
+					status: 302,
+					headers: { location: target, vary: 'Accept-Language, Cookie' },
+				})
+		}
+
 		if (publicDir) {
 			const page = await servePublic(publicDir, request)
 
@@ -183,7 +209,10 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 		if (own) return own
 
 		if (publicDir && wantsPage(request)) {
-			const missing = await serveFile(join(publicDir, '404.html'))
+			const locale = localeOfPath(pathname)
+			const missing =
+				(locale !== DEFAULT_LOCALE && (await serveFile(join(publicDir, locale, '404.html')))) ||
+				(await serveFile(join(publicDir, '404.html')))
 
 			if (missing) return new Response(missing.body, { status: 404, headers: missing.headers })
 		}
@@ -204,14 +233,19 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			if (pathname === '/mcp') response = Response.json(INTERNAL_ERROR, { status: 500 })
 			else if (publicDir && wantsPage(request)) {
 				// Человека со страницы ведём на страницу ошибки, остров или скрипт получает JSON.
+				const locale = requestLocale(request)
+
 				response = new Response(null, {
 					status: 303,
 					headers: {
-						location: errorPage({
-							code: '500',
-							title: 'Что-то сломалось',
-							message: 'Попробуй ещё раз чуть позже.',
-						}),
+						location: errorPage(
+							{
+								code: '500',
+								title: kt(locale, 'server.brokenTitle'),
+								message: kt(locale, 'server.later'),
+							},
+							locale,
+						),
 					},
 				})
 			} else response = apiError(500, 'internal', 'Internal error')
@@ -370,6 +404,44 @@ function secure(response: Response, pages: boolean): Response {
 }
 
 /** Браузер за страницей, а не `fetch` острова: он просит HTML. */
+/**
+ * Куда отправить человека за страницей на его языке, или `null`, если он уже там.
+ * Явный выбор из cookie действует в обе стороны. Без него сервер только уводит
+ * с русской страницы на английскую по `Accept-Language`: ссылку на `/en/…` не трогает.
+ * Редирект -- только если страница на нужном языке собрана, свои маршруты сервиса не задеты.
+ */
+async function languageRedirect(root: string, request: Request): Promise<string | null> {
+	const url = new URL(request.url)
+	const current = localeOfPath(url.pathname)
+	const chosen = cookieLocale(request)
+	const wanted: Locale = chosen ?? negotiateLocale(request.headers.get('accept-language'))
+
+	if (wanted === current || !enabledLocales().includes(wanted)) return null
+
+	if (!chosen && current !== DEFAULT_LOCALE) return null
+
+	const target = localizePath(url.pathname, wanted)
+
+	if (!(await pageFile(root, target))) return null
+
+	return target + url.search
+}
+
+/** Собранная страница для пути, как её отдаёт `servePublic`, или `null`. */
+async function pageFile(root: string, pathname: string): Promise<string | null> {
+	const name = pathname === '/' ? 'index' : pathname.slice(1).replace(/\/$/, '')
+
+	if (!/^[a-z0-9/-]+$/i.test(name) || name.includes('..')) return null
+
+	const file = join(root, `${name}.html`)
+
+	try {
+		return (await stat(file)).isFile() ? file : null
+	} catch {
+		return null
+	}
+}
+
 function wantsPage(request: Request) {
 	if (request.method !== 'GET') return false
 

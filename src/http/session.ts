@@ -1,3 +1,5 @@
+import { kt, requestLocale } from '#kit/i18n'
+
 import { isLoopback } from './config.ts'
 import { apiError } from './json.ts'
 import type { TokenClaims, Tokens } from './oauth/tokens.ts'
@@ -54,5 +56,5 @@ export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session')
 export function sameOrigin(publicUrl: URL, request: Request): Response | undefined {
 	if (request.headers.get('origin') === publicUrl.origin) return undefined
 
-	return apiError(403, 'forbidden_origin', 'Запрос пришёл не со страницы сервиса')
+	return apiError(403, 'forbidden_origin', kt(requestLocale(request), 'server.foreignOrigin'))
 }

@@ -1,3 +1,5 @@
+import { kt, localizePath, requestLocale } from '#kit/i18n'
+
 import type { TokenClaims } from './oauth/tokens.ts'
 import type { Sessions } from './session.ts'
 
@@ -23,12 +25,12 @@ export function sendJson(body: unknown, status = 200, headers?: HeadersInit): Re
 export type ErrorPageOptions = { code?: string; title: string; message?: string }
 
 /** Адрес статической страницы `/error` с текстом в query: туда сервер редиректит человека. */
-export function errorPage({ code = 'error', title, message }: ErrorPageOptions): string {
+export function errorPage({ code = 'error', title, message }: ErrorPageOptions, locale = 'ru'): string {
 	const query = new URLSearchParams({ code, title })
 
 	if (message) query.set('message', message)
 
-	return `/error?${query}`
+	return `${localizePath('/error', locale)}?${query}`
 }
 
 /**
@@ -40,5 +42,8 @@ export function errorPage({ code = 'error', title, message }: ErrorPageOptions):
  * ```
  */
 export async function requireSession(sessions: Sessions, request: Request): Promise<TokenClaims | Response> {
-	return (await sessions.read(request)) ?? apiError(401, 'unauthorized', 'Нужно войти')
+	return (
+		(await sessions.read(request)) ??
+		apiError(401, 'unauthorized', kt(requestLocale(request), 'server.unauthorized'))
+	)
 }

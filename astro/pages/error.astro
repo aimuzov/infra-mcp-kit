@@ -1,8 +1,13 @@
 ---
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
+
 import Fail from '@aimuzov/infra-mcp-kit/astro/components/fail.svelte'
 import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+const locale = localeOfPath(Astro.url.pathname)
 ---
 
-<Layout title="Ошибка" screen="error">
-	<Fail client:load />
+<Layout title={pt(locale, 'error.title')} screen="error">
+	<Fail client:load {locale} />
 </Layout>

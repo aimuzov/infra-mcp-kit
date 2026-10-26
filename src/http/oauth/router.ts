@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 
 import { errorPage } from '#kit/http/json'
+import { kt, requestLocale, type Locale } from '#kit/i18n'
 import { log, type Logger } from '#kit/log'
 import type { AuthInfo } from '#kit/mcp'
 import { messageOf } from '#kit/results'
@@ -245,12 +246,14 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 	}
 
 	// Страница ошибки статическая, текст ей уходит в query: в нём нет ничего секретного.
-	const fail = (title: string, message?: string) =>
-		redirect(errorPage({ code: 'invalid_request', title, message }), 303)
+	const fail = (locale: Locale, title: string, message?: string) =>
+		redirect(errorPage({ code: 'invalid_request', title, message }, locale), 303)
 
 	/** Колбэк входа: GET для виджетов, которые возвращают человека ссылкой, POST для форм. */
 	async function callback(request: Request) {
 		if (request.method !== 'GET' && request.method !== 'POST') return methodNotAllowed('GET, POST')
+
+		const locale = requestLocale(request)
 
 		const input = {
 			request,
@@ -261,13 +264,13 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		const raw = input.query.request ?? input.form.request ?? ''
 		const claims = raw ? await tokens.verify('authorize', raw) : null
 
-		if (!claims) return fail('Ссылка для входа устарела', 'Начни подключение заново из клиента.')
+		if (!claims) return fail(locale, kt(locale, 'oauth.expired'), kt(locale, 'oauth.restart'))
 
 		const client = store.getClient(claims.sub)
 		const redirectUri = String(claims.redirect_uri)
 
 		if (!client || !client.redirect_uris.some((uri) => redirectUriMatches(redirectUri, uri))) {
-			return fail('Клиент не зарегистрирован', 'Начни подключение заново из клиента.')
+			return fail(locale, kt(locale, 'oauth.unknownClient'), kt(locale, 'oauth.restart'))
 		}
 
 		try {
@@ -285,11 +288,11 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 			if (!(error instanceof LoginError)) {
 				logger.error('login failed', { message: messageOf(error) })
 
-				return fail('Не получилось войти', 'Попробуй ещё раз чуть позже.')
+				return fail(locale, kt(locale, 'oauth.failed'), kt(locale, 'server.later'))
 			}
 
 			// 303: после POST формы браузер идёт на страницу входа GET-ом.
-			return redirect(provider.loginPage(raw, client, redirectUri, error.message), 303)
+			return redirect(provider.loginPage(raw, client, redirectUri, error.in(locale), locale), 303)
 		}
 	}
 

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import type { AstroIntegration } from 'astro'
 
 /** Что знают страницы кита о сервисе на сборке. */
@@ -9,9 +10,25 @@ export type PagesService = {
 	/** Одна строка под именем на лендинге: что коннектор делает. */
 	tagline?: string
 	lead?: string
-	tools?: string[]
+	/** Чипы инструментов на лендинге: строка или подпись с иконкой Lucide. */
+	tools?: Array<string | PagesTool>
 	/** Цвет сервиса для светлой и тёмной темы, по умолчанию фиолетовый "Сигнала". */
 	accent?: { light: string; dark: string }
+	/** Цвета расслоения у заголовка и главной кнопки, по умолчанию красный и голубой. */
+	glitch?: { a: string; b: string }
+	/**
+	 * Знак сервиса, к которому подключается коннектор: путь к SVG от корня проекта.
+	 * Встаёт слева от имени на лендинге и на место сервиса на экране входа.
+	 */
+	logo?: string
+	/** Разметка знака из `logo`, её кладёт интеграция на сборке. */
+	logoSvg?: string
+}
+
+export type PagesTool = {
+	label: string
+	/** Имя иконки Lucide в kebab-case, как на lucide.dev: `kanban`, `list-checks`. */
+	icon?: string
 }
 
 export type TokenField = {
@@ -48,6 +65,38 @@ export function cssColor(value: string): string {
 }
 
 /**
+ * Знак встаёт в страницу разметкой, поэтому пускаем только статичный SVG: без скриптов,
+ * обработчиков, внешних ссылок и атрибутов `style`, которые CSP страниц всё равно режет.
+ */
+export function safeSvg(text: string): string {
+	const svg = text.replace(/<\?xml[^>]*\?>/, '').trim()
+
+	if (!/^<svg[\s>][\s\S]*<\/svg>$/i.test(svg)) throw new Error('Знак сервиса должен быть одним SVG')
+
+	const banned = /<script|<foreignObject|<!ENTITY|\son\w+\s*=|\sstyle\s*=|javascript:|\shref\s*=\s*["'](?!#)/i
+
+	if (banned.test(svg)) throw new Error('В знаке сервиса есть скрипт, стиль или внешняя ссылка')
+
+	return svg
+}
+
+/** Стили из конфига: цвет сервиса и цвета глитча. Пустая строка, если сервис их не задал. */
+export function serviceCss(service: PagesService): string {
+	const vars = []
+
+	if (service.accent)
+		vars.push(`--signal-hue: light-dark(${cssColor(service.accent.light)}, ${cssColor(service.accent.dark)});`)
+
+	if (service.glitch)
+		vars.push(
+			`--signal-glitch-a: ${cssColor(service.glitch.a)};`,
+			`--signal-glitch-b: ${cssColor(service.glitch.b)};`,
+		)
+
+	return vars.length > 0 ? `:root { ${vars.join(' ')} }\n` : ''
+}
+
+/**
  * Страницы MCP-коннектора для Astro: лендинг, вход, ошибка и 404 статикой, а данные
  * под пользователя дорисовывают острова в браузере. Сервис подключает её в своём
  * `astro.config.mjs` рядом с `svelte()`.
@@ -55,15 +104,24 @@ export function cssColor(value: string): string {
 export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	const skip = new Set(options.override ?? [])
 
-	if (options.service.accent) {
-		cssColor(options.service.accent.light)
-		cssColor(options.service.accent.dark)
-	}
+	// Плохой цвет роняет сборку сразу, а не при первой загрузке стилей.
+	serviceCss(options.service)
 
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ injectRoute, updateConfig }) => {
+			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+				const { logo } = options.service
+				const resolved: McpPagesOptions = logo
+					? {
+							...options,
+							service: {
+								...options.service,
+								logoSvg: safeSvg(readFileSync(new URL(logo, config.root), 'utf8')),
+							},
+						}
+					: options
+
 				const routes: Array<[string, string, boolean]> = [
 					['/', 'index.astro', !skip.has('index')],
 					['/login', 'login.astro', Boolean(options.tokenForm)],
@@ -97,7 +155,7 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 						},
 					},
 					vite: {
-						plugins: [virtualOptions(options)],
+						plugins: [virtualOptions(resolved)],
 						// Prerender-сборка лежит в каталоге сервера и ищет `cookie` оттуда, а там
 						// поднят 0.7 от express из зависимостей кита, без `parseCookie` Astro.
 						// Вшитый в сборку, он берётся из node_modules самого Astro.
@@ -124,7 +182,6 @@ export const ACCENT_MODULE = 'virtual:infra-mcp-kit/accent.css'
  */
 function virtualOptions(options: McpPagesOptions) {
 	const resolved = `\0${VIRTUAL_MODULE}`
-	const accent = options.service.accent
 
 	return {
 		name: 'infra-mcp-kit-pages',
@@ -139,9 +196,7 @@ function virtualOptions(options: McpPagesOptions) {
 		load(id: string) {
 			if (id === resolved) return `export default ${JSON.stringify(options)}`
 
-			if (id === ACCENT_MODULE) {
-				return accent ? `:root { --signal-hue: light-dark(${accent.light}, ${accent.dark}); }\n` : ''
-			}
+			if (id === ACCENT_MODULE) return serviceCss(options.service)
 
 			return undefined
 		},

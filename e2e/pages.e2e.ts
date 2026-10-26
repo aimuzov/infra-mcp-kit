@@ -220,6 +220,26 @@ describe('острова', () => {
 		await context.close()
 	})
 
+	test('знак сервиса у имени и на экране входа, глитч в цветах сервиса', async () => {
+		const { page, context } = await open('/')
+
+		assert.equal(await page.locator('.hero__title .hero__logo svg').count(), 1)
+		// Иконка только у инструмента, где она задана: строка остаётся простым чипом.
+		assert.equal(await page.locator('.chips li', { hasText: 'whoami' }).locator('svg.lucide-user').count(), 1)
+		assert.equal(await page.locator('.chips li', { hasText: 'ping' }).locator('svg').count(), 0)
+
+		const glitch = await page.locator('.hero h1').evaluate((node) => ({
+			a: getComputedStyle(node, '::before').color,
+			b: getComputedStyle(node, '::after').color,
+		}))
+
+		assert.deepEqual(glitch, { a: 'rgb(241, 31, 36)', b: 'rgb(95, 232, 176)' })
+		await page.goto(`${http.base}/login`)
+		assert.equal(await page.locator('.handshake__logo svg').count(), 1)
+		assert.equal(await page.locator('.handshake__mark').count(), 0)
+		await context.close()
+	})
+
 	test('подпись автора -- Credit из site-kit со ссылкой на исходники', async () => {
 		const { page, context } = await open('/')
 
@@ -235,23 +255,39 @@ describe('острова', () => {
 
 	// Стили компонентов, которые появляются только в браузере, Astro в страницу не вшивает:
 	// адрес на лендинге раньше был голой системной кнопкой.
-	test('адрес на лендинге -- CopyValue со своими стилями и настоящим адресом', async () => {
+	test('адрес на лендинге -- плашка со своими стилями, настоящим адресом и в одну строку', async () => {
 		const { page, context } = await open('/')
-		const button = page.locator('.connect__url .copy__button')
+		const value = page.locator('.connect__url .plate__value')
 
-		assert.equal(await button.locator('.copy__value').textContent(), new URL('/mcp', http.base).href)
+		assert.equal(await value.textContent(), new URL('/mcp', http.base).href)
 
-		const style = await button.evaluate((node) => {
+		const style = await value.evaluate((node) => {
 			const css = getComputedStyle(node)
 
-			return {
-				radius: css.borderTopLeftRadius,
-				font: getComputedStyle(node.querySelector('.copy__value')!).fontFamily,
-			}
+			return { font: css.fontFamily, wrap: css.whiteSpace, overflow: css.textOverflow }
 		})
 
-		assert.equal(style.radius, '6px')
 		assert.match(style.font, /mono/i)
+		assert.deepEqual([style.wrap, style.overflow], ['nowrap', 'ellipsis'])
+		await context.close()
+	})
+
+	test('вкладки подключения: клик и стрелки переключают, команда для Claude Code с адресом', async () => {
+		const { page, context } = await open('/')
+		const code = page.getByRole('tab', { name: 'Claude Code' })
+
+		assert.equal(await page.locator('#connect-panel-code').isHidden(), true)
+		await code.click()
+		assert.equal(await code.getAttribute('aria-selected'), 'true')
+
+		assert.match(
+			(await page.locator('#connect-panel-code .plate__value').textContent()) ?? '',
+			/^claude mcp add --transport http fixture http:\/\/.+\/mcp$/,
+		)
+
+		await page.keyboard.press('ArrowLeft')
+		assert.equal(await page.getByRole('tab', { name: 'claude.ai и Desktop' }).getAttribute('aria-selected'), 'true')
+		assert.equal(await page.locator('#connect-panel-app').isVisible(), true)
 		await context.close()
 	})
 })

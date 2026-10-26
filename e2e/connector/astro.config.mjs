@@ -15,7 +15,9 @@ export default defineConfig({
 				repo: 'https://github.com/aimuzov/infra-mcp-kit',
 				tagline: 'Проверка страниц кита на Astro',
 				lead: 'Статика из кита, данные под пользователя дорисовывают острова в браузере.',
-				tools: ['whoami', 'ping'],
+				tools: [{ label: 'whoami', icon: 'user' }, 'ping'],
+				logo: './logo.svg',
+				glitch: { a: '#f11f24', b: '#5fe8b0' },
 			},
 			tokenForm: {
 				title: 'Подключение fixture',

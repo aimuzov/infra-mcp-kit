@@ -3,6 +3,8 @@ import type { AstroIntegration } from 'astro'
 
 import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
 
+import { assertSiteKit, siteKitVersion } from './site-kit.ts'
+
 export type { Locale, Strings } from '#kit/i18n'
 
 /** Что знают страницы кита о сервисе на сборке. */
@@ -127,7 +129,9 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+			'astro:config:setup': ({ config, injectRoute, updateConfig, logger }) => {
+				assertSiteKit(siteKitVersion(), logger)
+
 				const { logo } = options.service
 				const resolved: McpPagesOptions = logo
 					? {

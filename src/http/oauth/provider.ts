@@ -70,6 +70,12 @@ export type Login = {
 	page: string
 	/** Что ещё положить во фрагмент страницы входа, например id для dev-входа на localhost. */
 	context?: Record<string, string>
+	/**
+	 * Что страница входа берёт с сервера по `GET /authorize/page`, а не из фрагмента. Фрагмент
+	 * в ссылке подставит кто угодно, поэтому то, что выбирает, кому человек доверится, например
+	 * имя бота Telegram, едет только так.
+	 */
+	pageData?: Record<string, string>
 	/** Проверить то, с чем человек вернулся. `LoginError` покажет страницу входа снова. */
 	complete(input: LoginInput): Grant | Promise<Grant>
 	/**
@@ -88,6 +94,9 @@ export type ProviderOptions = {
 }
 
 export const CALLBACK_PATH = '/authorize/callback'
+
+/** Откуда страница входа берёт `Login.pageData`. */
+export const PAGE_DATA_PATH = '/authorize/page'
 
 /**
  * Регистрация открыта всем, а клиенты хранятся вечно: без потолка один адрес

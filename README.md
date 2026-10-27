@@ -83,7 +83,7 @@ await serveHttp({
 
 - `POST /mcp` builds a new server and transport for every request. With `auth` it wants a Bearer token, other methods get 405.
 - `GET /health` answers `{ "ok": true }`.
-- OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` and `/authorize/callback`.
+- OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke`, `/authorize/callback` and `/authorize/page`.
 - The pages from `publicDir`, `/x` serves `x.html`. A browser gets `404.html` for an unknown route and the `/error` page for a failure, `fetch` gets JSON.
 - `routes(request, context)` adds the service's own API: a `Response`, or `undefined` to pass the request on. An array runs in order, the first `Response` wins.
 
@@ -102,7 +102,7 @@ Sign-in is a static page plus a `complete({ request, query, form })` hook that t
 - `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
 - `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
 
-The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
+The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy. Anyone can put a fragment into a link, so whatever decides whom the person trusts comes from the server: the page gets `Login.pageData` from `GET /authorize/page`.
 
 For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession(sessions, request)` gives the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 to a foreign `Origin`, `sendJson` and `apiError` build responses in one shape.
 
@@ -122,7 +122,7 @@ await serveHttp({
 
 `loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback. `telegramAccount` checks a `devUserId` passed by hand too: with `PUBLIC_URL` outside loopback it does not work and only leaves a warning in the log.
 
-The pages are built without this env, so the server hands them the bot name at runtime: `telegramLogin({ botToken, botName })` puts it into the fragment of `/login/telegram`, `telegramAccount` gives it to `/account/signin`.
+The pages are built without this env, so the server hands them the bot name at runtime: `telegramLogin({ botToken, botName })` gives it to `/login/telegram` through `GET /authorize/page`, `telegramAccount` to `/account/signin` through `GET /account/auth`. The page never takes the bot from the fragment, or a link could show someone else's bot.
 
 `telegramAccount` signs a person in to the account with Telegram and keeps them in the session cookie:
 

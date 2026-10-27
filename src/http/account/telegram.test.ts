@@ -399,7 +399,7 @@ describe('одна подпись на OAuth-вход и кабинет', () => 
 })
 
 describe('имя бота в рантайме', () => {
-	test('OAuth-вход отдаёт бота странице во фрагменте и пускает по подписи', async () => {
+	test('OAuth-вход отдаёт бота странице с сервера, не во фрагменте, и пускает по подписи', async () => {
 		const http = await startHttp((base) =>
 			createHttpApp({
 				config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
@@ -430,8 +430,14 @@ describe('имя бота в рантайме', () => {
 			},
 		})
 
-		// Бот едет в `Login.context`, как и dev-id: страница берёт его из фрагмента.
-		assert.deepEqual(seen?.context, { bot: 'runtime_bot' })
+		// Фрагмент в ссылке подставит кто угодно: бота страница берёт только с сервера.
+		assert.deepEqual(seen?.context, {})
+
+		const page = await fetch(`${http.base}/authorize/page`)
+
+		assert.deepEqual(await page.json(), { bot: 'runtime_bot' })
+		assert.equal(page.headers.get('cache-control'), 'no-store')
+		assert.equal((await fetch(`${http.base}/authorize/page`, { method: 'POST' })).status, 405)
 
 		const client = await connectHttp(http.base, flow.tokens.access_token)
 
@@ -439,13 +445,14 @@ describe('имя бота в рантайме', () => {
 		await client.close()
 	})
 
-	test('без имени бота фрагмент прежний', () => {
+	test('фрагмент прежний: бот едет в pageData, dev-id -- во фрагменте', () => {
 		assert.equal(telegramLogin({ botToken: BOT }).context, undefined)
+		assert.equal(telegramLogin({ botToken: BOT }).pageData, undefined)
 
-		assert.deepEqual(telegramLogin({ botToken: BOT, botName: 'b_bot', devUserId: '7' }).context, {
-			bot: 'b_bot',
-			dev: '7',
-		})
+		const login = telegramLogin({ botToken: BOT, botName: 'b_bot', devUserId: '7' })
+
+		assert.deepEqual(login.context, { dev: '7' })
+		assert.deepEqual(login.pageData, { bot: 'b_bot' })
 	})
 
 	test('конфиг: бот из окружения, dev-вход только на localhost и без бота', () => {

@@ -51,6 +51,7 @@ export {
 	OAuthError,
 	oauthRouter,
 	ownClaims,
+	PAGE_DATA_PATH,
 	readBody,
 	readForm,
 	redirectUriMatches,

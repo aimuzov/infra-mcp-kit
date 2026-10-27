@@ -241,14 +241,22 @@ describe('острова', () => {
 		await en.context.close()
 	})
 
-	test('OAuth-вход через Telegram берёт бота из фрагмента, без него -- со сборки', async () => {
-		const fragment = 'request=r&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai'
+	test('OAuth-вход через Telegram берёт бота с сервера, без него -- со сборки, но не из фрагмента', async () => {
+		// Бот во фрагменте -- чужой: ссылку с ним подсунул бы фишер.
+		const hash = 'request=r&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&bot=evil_bot'
 
-		for (const [hash, bot] of [
-			[`${fragment}&bot=runtime_bot`, 'runtime_bot'],
-			[fragment, 'fixture_bot'],
+		// У фикстуры вход формой токена: сервер с `telegramLogin({ botName })` подменяем.
+		for (const [server, bot] of [
+			['runtime_bot', 'runtime_bot'],
+			[undefined, 'fixture_bot'],
 		] as const) {
 			const { page, context } = await open(`/login/telegram#${hash}`)
+
+			if (server) {
+				await page.route('**/authorize/page', (route) => route.fulfill({ json: { bot: server } }))
+				await page.reload()
+			}
+
 			const widget = page.locator('script[data-telegram-login]')
 
 			await widget.waitFor({ state: 'attached' })

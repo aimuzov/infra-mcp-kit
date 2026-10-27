@@ -8,19 +8,25 @@
 
 	type Props = {
 		service: string
-		/** Имя бота со сборки. Сервер с `telegramLogin({ botName })` присылает своё во фрагменте. */
+		/** Имя бота со сборки. Сервер с `telegramLogin({ botName })` присылает своё через `src`. */
 		botName?: string
+		/** Откуда брать бота сервера: `GET /authorize/page` из OAuth кита. */
+		src?: string
 		grants?: string[]
 		locale?: string
 	}
 
-	let { service, botName = '', grants = [], locale = 'ru' }: Props = $props()
+	let { service, botName = '', src = '/authorize/page', grants = [], locale = 'ru' }: Props = $props()
 
 	let context = $state<LoginContext | null>(null)
 	let widget = $state<HTMLElement>()
 
+	// Бот сервера, `null` -- ещё не ответил. Только с сервера: фрагмент в ссылке подставит
+	// кто угодно, и виджет попросил бы человека довериться чужому боту.
+	let serverBot = $state<string | null>(null)
+
 	// Бот из окружения сервера главнее бота со сборки: страницу обычно собирают без окружения прода.
-	const bot = $derived(context?.bot || botName)
+	const bot = $derived(serverBot === null ? '' : serverBot || botName)
 
 	const devUrl = $derived.by(() => {
 		if (!context?.dev) return ''
@@ -34,6 +40,14 @@
 
 	$effect(() => {
 		context = readLoginContext()
+	})
+
+	// Сервер без `/authorize/page` или без бота -- остаётся бот со сборки.
+	$effect(() => {
+		fetch(src, { headers: { accept: 'application/json' } })
+			.then((res) => (res.ok ? res.json() : {}))
+			.then((data: { bot?: unknown }) => (serverBot = typeof data.bot === 'string' ? data.bot : ''))
+			.catch(() => (serverBot = ''))
 	})
 
 	// Виджет вставляем скриптом: его data-auth-url собирается из фрагмента, а он есть только
@@ -73,7 +87,7 @@
 			<Alert variant="danger">{pt(locale, 'login.broken')}</Alert>
 		{:else if devUrl}
 			<a class="telegram__dev" href={devUrl}>{pt(locale, 'login.dev', { id: context?.dev ?? '' })}</a>
-		{:else if context && !bot}
+		{:else if context && serverBot !== null && !bot}
 			<Alert variant="danger">{pt(locale, 'login.telegramMissing')}</Alert>
 		{:else}
 			<div class="telegram" bind:this={widget}></div>

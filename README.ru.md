@@ -83,7 +83,7 @@ await serveHttp({
 
 - `POST /mcp` создаёт новый сервер и транспорт на каждый запрос. С `auth` требует Bearer-токен, другие методы получают 405.
 - `GET /health` отвечает `{ "ok": true }`.
-- OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` и `/authorize/callback`.
+- OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke`, `/authorize/callback` и `/authorize/page`.
 - Страницы из `publicDir`, `/x` отдаёт `x.html`. Браузер на неизвестный адрес получает `404.html`, при сбое — страницу `/error`, `fetch` получает JSON.
 - `routes(request, context)` добавляет собственное API сервиса: `Response` или `undefined`, чтобы пропустить запрос дальше. Массив идёт по порядку, отвечает первый `Response`.
 
@@ -102,7 +102,7 @@ await serveHttp({
 - `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
 - `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
 
-Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
+Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси. Фрагмент в ссылке подставит кто угодно, поэтому то, что решает, кому человек доверится, страница берёт с сервера: `Login.pageData` она получает по `GET /authorize/page`.
 
 Для кабинета: `sessions(tokens, publicUrl)` даёт подписанную httpOnly-куку, `requireSession(sessions, request)` отдаёт сессию или `Response` 401, `sameOrigin(publicUrl, request)` — 403 на чужой `Origin`, `sendJson` и `apiError` собирают ответы в одном формате.
 
@@ -122,7 +122,7 @@ await serveHttp({
 
 `loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback. `telegramAccount` проверяет и `devUserId`, переданный руками: при `PUBLIC_URL` не на loopback он не работает, а только оставляет предупреждение в логе.
 
-Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме: `telegramLogin({ botToken, botName })` кладёт его во фрагмент `/login/telegram`, `telegramAccount` отдаёт его `/account/signin`.
+Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме: `telegramLogin({ botToken, botName })` отдаёт его `/login/telegram` через `GET /authorize/page`, `telegramAccount` — `/account/signin` через `GET /account/auth`. Из фрагмента бота страница не берёт: иначе ссылка показала бы виджет чужого бота.
 
 `telegramAccount` пускает человека в кабинет через Telegram и держит его в куке сессии:
 

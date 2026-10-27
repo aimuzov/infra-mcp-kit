@@ -14,7 +14,7 @@ export type TelegramUser = {
 
 /**
  * Бот входа из окружения рантайма. Страницы собираются без него, поэтому имя бота
- * сервер отдаёт им сам: OAuth-входу во фрагменте, кабинету через `/account/auth`.
+ * сервер отдаёт им сам: OAuth-входу через `/authorize/page`, кабинету через `/account/auth`.
  */
 export type TelegramConfig = {
 	/** Токен бота: им проверяется подпись виджета. Секрет. */
@@ -146,17 +146,12 @@ export function spendSignature(hash: string, now = Date.now()): boolean {
 
 /** Вход через Telegram Login Widget: виджет возвращает человека GET-ссылкой с подписанным query. */
 export function telegramLogin(options: TelegramLoginOptions): Login {
-	const context: Record<string, string> = {}
-
-	// Страница собрана без окружения рантайма: имя бота она берёт из фрагмента, а на localhost
-	// показывает dev-ссылку вместо виджета, который там не работает.
-	if (options.botName) context.bot = options.botName
-
-	if (options.devUserId) context.dev = options.devUserId
-
 	return {
 		page: options.page ?? '/login/telegram',
-		context: Object.keys(context).length > 0 ? context : undefined,
+		// Страница входа покажет dev-ссылку вместо виджета: на localhost виджет не работает.
+		context: options.devUserId ? { dev: options.devUserId } : undefined,
+		// Страница собрана без окружения рантайма, а бота из фрагмента подставил бы кто угодно.
+		pageData: options.botName ? { bot: options.botName } : undefined,
 		complete({ query }) {
 			const user = telegramUser(query, options)
 

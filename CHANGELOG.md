@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.2.0...v3.2.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **deps:** move to tmcp 1.20.1 and drop the initialize workaround ([23e28ac](https://github.com/aimuzov/infra-mcp-kit/commit/23e28ac353871435f39c9e7f6691ccaf84a7a3da))
+* **deps:** move to tmcp 1.20.1 and drop the initialize workaround ([525c0d7](https://github.com/aimuzov/infra-mcp-kit/commit/525c0d71af476c732fd763b9de25803cfa74b148))
+
 ## [3.2.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.1.0...v3.2.0) (2026-10-26)
 
 

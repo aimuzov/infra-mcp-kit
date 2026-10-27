@@ -59,6 +59,11 @@ describe('scrub: каждый класс секрета', () => {
 			'{"client_secret": "s3cr3t", "name": "x"}',
 			`{"client_secret": "${FILTERED}", "name": "x"}`,
 		],
+		[
+			'значение в кавычках с пробелом и запятой',
+			`{"password": "correct horse, battery", 'api_key': 'a b'}`,
+			`{"password": "${FILTERED}", 'api_key': '${FILTERED}'}`,
+		],
 		['переменная окружения', 'KAITEN_API_TOKEN=abc is set twice', `KAITEN_API_TOKEN=${FILTERED} is set twice`],
 	]
 
@@ -122,7 +127,12 @@ describe('scrubEvent', () => {
 						type: 'Error',
 						value: `401 at https://kaiten.example/api?token=${KAITEN}`,
 						mechanism: { type: 'generic', data: { token: 'x' } },
-						stacktrace: { frames: [{ filename: 'a.ts', vars: { apiToken: KAITEN, n: 1 } }] },
+						stacktrace: {
+							frames: [
+								{ filename: 'a.ts', lineno: 3, vars: { apiToken: KAITEN, n: 1 } },
+								{ filename: 'https://evil.example/x.js?token=t', abs_path: `/srv/${JWT}.js` },
+							],
+						},
 					},
 				],
 			},
@@ -148,10 +158,10 @@ describe('scrubEvent', () => {
 		assert.equal(event.exception.values[0]?.value, `401 at https://kaiten.example/api?token=${FILTERED}`)
 		assert.deepEqual(event.exception.values[0]?.mechanism, { type: 'generic', data: { token: FILTERED } })
 
-		assert.deepEqual(event.exception.values[0]?.stacktrace.frames[0], {
-			filename: 'a.ts',
-			vars: { apiToken: FILTERED, n: 1 },
-		})
+		assert.deepEqual(event.exception.values[0]?.stacktrace.frames, [
+			{ filename: 'a.ts', lineno: 3, vars: { apiToken: FILTERED, n: 1 } },
+			{ filename: `https://evil.example/x.js?token=${FILTERED}`, abs_path: `/srv/${FILTERED}` },
+		])
 
 		assert.deepEqual(event.request, {
 			method: 'POST',

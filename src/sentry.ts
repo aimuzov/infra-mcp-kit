@@ -219,15 +219,27 @@ export function withoutMessage(error: unknown): Error {
 	const name = error instanceof Error && /^[\w$.]{1,60}$/.test(error.name) ? error.name : 'Error'
 	const code = codeOf(error) ?? codeOf((error as { cause?: unknown } | null)?.cause)
 	const copy = new Error(code === undefined ? '' : String(code))
-	// Только строки кадров: в первых строках стека тот же текст ошибки.
-	const frames = (error instanceof Error ? (error.stack ?? '') : '')
-		.split('\n')
-		.filter((line) => /^\s+at /.test(line))
+	const frames = error instanceof Error ? framesOf(error) : []
 
 	copy.name = name
 	copy.stack = [String(copy), ...frames].join('\n')
 
 	return copy
+}
+
+/**
+ * Строки кадров без заголовка стека. Заголовок -- текст ошибки, и строка в нём вида
+ * `    at ...` иначе ушла бы кадром. Если текст поменяли после создания, границу
+ * заголовка не найти: тогда кадры ещё и чистим от секретов.
+ */
+function framesOf(error: Error): string[] {
+	const stack = error.stack ?? ''
+	const head = String(error)
+	const lines = stack.startsWith(head)
+		? stack.slice(head.length).split('\n')
+		: stack.split('\n').slice(error.message.split('\n').length)
+
+	return lines.filter((line) => /^\s+at /.test(line)).map(scrub)
 }
 
 function codeOf(error: unknown): string | number | undefined {

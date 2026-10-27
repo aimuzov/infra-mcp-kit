@@ -145,6 +145,15 @@ test('withoutMessage: тип, код и кадры стека без текст�
 	assert.equal(withoutMessage(Object.assign(new Error('x'), { status: 401 })).message, '401')
 	assert.equal(withoutMessage(Object.assign(new Error('x'), { code: `token ${PLANTED}` })).message, '')
 	assert.equal(withoutMessage('строка').name, 'Error')
+
+	// Строка вида `at ...` в тексте ошибки не должна уйти кадром.
+	const forged = new Error(`boom\n    at https://evil.example/?token=${PLANTED} (x.js:1:1)`)
+
+	assert.ok(!withoutMessage(forged).stack?.includes('evil.example'))
+
+	forged.message = 'changed'
+	assert.ok(!withoutMessage(forged).stack?.includes(PLANTED))
+	assert.match(withoutMessage(forged).stack ?? '', /\n\s+at /)
 })
 
 describe('sentry', () => {

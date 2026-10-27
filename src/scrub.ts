@@ -35,6 +35,11 @@ const HEADER = new RegExp(
 	String.raw`\b((?:proxy-)?authorization|(?:set-)?cookie)(["']?\s*:\s*["']?)${NOT_FILTERED}[^"'\r\n]+`,
 	'gi',
 )
+// Значение в кавычках до закрывающей: в нём бывают пробелы и запятые.
+const QUOTED = new RegExp(
+	String.raw`\b(${SECRET_KEY})(["']?\s*[:=]\s*)(["'])${NOT_FILTERED}(?:\\.|(?!\3)[^\\\r\n])*\3`,
+	'gi',
+)
 const PAIR = new RegExp(String.raw`\b(${SECRET_KEY})(["']?\s*[:=]\s*)(["']?)${NOT_FILTERED}([^\s"'&,;)}\]]+)`, 'gi')
 
 const BUILTIN: Replace[] = [
@@ -50,6 +55,7 @@ const BUILTIN: Replace[] = [
 		text.replace(/\b(Bearer|Basic)(\s+)([\w~+/.=-]+)/gi, (all, scheme: string, space: string, value: string) =>
 			notWord(value) ? `${scheme}${space}${FILTERED}` : all,
 		),
+	(text) => text.replace(QUOTED, `$1$2$3${FILTERED}$3`),
 	// `token=...`, `"client_secret": "..."`. После голого двоеточия слово остаётся:
 	// `token: expired` не секрет.
 	(text) =>
@@ -126,7 +132,7 @@ function scrubValue(value: unknown, key = '', depth = 0): unknown {
 	return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrubValue(v, k, depth + 1)]))
 }
 
-type Frame = { vars?: unknown }
+type Frame = { filename?: string; abs_path?: string; vars?: unknown }
 type Exception = {
 	value?: string
 	mechanism?: { data?: unknown }
@@ -165,9 +171,13 @@ function scrubException(exception: Exception): Exception {
 		...(stacktrace?.frames && {
 			stacktrace: {
 				...stacktrace,
-				frames: stacktrace.frames.map((frame) =>
-					frame.vars === undefined ? frame : { ...frame, vars: scrubValue(frame.vars) },
-				),
+				// Кадр SDK собирает из строк стека, а в них может затесаться текст ошибки.
+				frames: stacktrace.frames.map(({ filename, abs_path: path, vars, ...frame }) => ({
+					...frame,
+					...(typeof filename === 'string' && { filename: scrub(filename) }),
+					...(typeof path === 'string' && { abs_path: scrub(path) }),
+					...(vars !== undefined && { vars: scrubValue(vars) }),
+				})),
 			},
 		}),
 	}

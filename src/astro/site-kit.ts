@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 /**
  * Самая старая infra-site-kit, с которой собираются страницы кита: `i18n.js` и переключатель
- * языка появились в 4.2.0. Тот же минимум стоит в `peerDependencies`.
+ * языка появились в 4.2.0. В `peerDependencies` его нет: stdio-серверы без страниц держат
+ * site-kit ради конфигов Prettier и oxlint, и старый не должен ронять им `npm install`.
  */
 export const SITE_KIT_MIN = '4.2.0'
 

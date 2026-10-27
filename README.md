@@ -207,7 +207,7 @@ Optional inputs of the action:
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
 - `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version. The runner image already has the libraries Chromium needs, so apt runs only when the browser doesn't start without them, with a time limit and three attempts. `--with-deps` used to pull fonts from a slow mirror past the job timeout.
 
-The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch. The kit declares it as an optional peer dependency, so `npm install` stops on an older one: an `ERESOLVE` warning names the conflict, then comes `E404`, because npm looks for a matching version in the registry. If an older one gets in anyway, `mcpPages()` stops `astro check` and `astro build` with the version to install, before Vite fails on `exports`.
+The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch. `mcpPages()` checks the installed one and stops `astro check`, `astro build` and `astro dev` with the version to install, before Vite fails on `exports`. It is not a peer dependency: stdio servers without pages keep site-kit for the Prettier and oxlint configs, and an older one there must not break their `npm install`.
 
 ## Migrating from 2.x
 

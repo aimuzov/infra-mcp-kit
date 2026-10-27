@@ -5,14 +5,16 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
 
-import { assertSiteKit, atLeast, SITE_KIT_MIN, siteKitVersion } from './site-kit.ts'
+import { assertSiteKit, atLeast, siteKitVersion } from './site-kit.ts'
 
-test('site-kit: минимум тот же, что в peerDependencies, а свой site-kit кита его проходит', () => {
+test('site-kit: свой site-kit кита проходит минимум, а в peerDependencies его нет', () => {
 	const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
 		peerDependencies: Record<string, string>
 	}
 
-	assert.equal(pkg.peerDependencies['@aimuzov/infra-site-kit'], `>=${SITE_KIT_MIN}`)
+	// Со старым site-kit ради конфигов линтеров peer-зависимость уронила бы `npm install`
+	// stdio-серверам без страниц, проверять его -- дело `mcpPages()`.
+	assert.equal(pkg.peerDependencies['@aimuzov/infra-site-kit'], undefined)
 	assert.doesNotThrow(() => assertSiteKit(siteKitVersion()))
 })
 

@@ -141,8 +141,7 @@ export default defineConfig({
 - `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
-- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
-- infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.5.0`: кит проверен на нём. Страницы собираются и на 4.1.1 и новее, а старые `Skeleton` и `InfoTip` пишут атрибут `style`, который CSP не пускает. До 5.1 в шапке вместо меню одна ссылка на другой язык.
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.5.0`, см. [ниже](#переезд-на-infra-site-kit-5).
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
@@ -155,6 +154,18 @@ export default defineConfig({
 Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
 При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Меню запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+
+### Переезд на infra-site-kit 5
+
+Страницы проверены на infra-site-kit 5.5.0, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.5.0
+```
+
+- 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
+- 5.1 превращает переключатель языка в меню: `details.lang` со ссылкой на каждый язык вместо ссылки `a.lang` на другой. Тест сервера, который кликал `a.lang`, сначала открывает меню: `page.locator('details.lang summary').click()`, потом `page.getByRole('link', { name: /English/ })`.
+- Сервер на 4.2 продолжает работать: кит не берёт ничего, чего нет в 4.2, просто в шапке остаётся старая ссылка.
 
 ## Тесты
 
@@ -211,17 +222,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 - `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
 - `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
 
-## Переезд на infra-site-kit 5
-
-API кита не меняется, сервер только переводит свою dev-зависимость:
-
-```bash
-npm install -E -D github:aimuzov/infra-site-kit#v5.5.0
-```
-
-- 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
-- 5.1 превращает переключатель языка в меню: `details.lang` со ссылкой на каждый язык вместо ссылки `a.lang` на другой. Тест сервера, который кликал `a.lang`, сначала открывает меню: `page.locator('details.lang summary').click()`, потом `page.getByRole('link', { name: /English/ })`.
-- Сервер на 4.x продолжает работать: кит не берёт ничего, чего нет в 4.x, просто в шапке остаётся старая ссылка.
+Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
 
 ## Переезд с 2.x
 

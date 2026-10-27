@@ -26,14 +26,22 @@ export function siteKitVersion(from: string | URL = import.meta.url): string | u
 	return undefined
 }
 
-/** Не ниже ли `version`, чем `min`, или `undefined`, если версию не разобрать. Хвост пререлиза не смотрим. */
+/**
+ * Не ниже ли `version`, чем `min`, или `undefined`, если версию не разобрать. Пререлиз ниже
+ * своего релиза: 4.2.0-rc.1 ещё без того, что пришло в 4.2.0. Пререлизы между собой не сравниваем.
+ */
 export function atLeast(version: string, min: string): boolean | undefined {
-	const parse = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number)
+	const parse = (v: string) => {
+		const m = /^v?(\d+)\.(\d+)\.(\d+)(-)?/.exec(v)
+
+		return m && [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ? 0 : 1]
+	}
+
 	const [have, need] = [parse(version), parse(min)]
 
 	if (!have || !need) return undefined
 
-	for (let i = 0; i < 3; i++) {
+	for (let i = 0; i < 4; i++) {
 		if (have[i] !== need[i]) return (have[i] ?? 0) > (need[i] ?? 0)
 	}
 

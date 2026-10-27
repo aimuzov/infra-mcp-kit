@@ -70,11 +70,13 @@ test('site-kit: неразборчивую версию пускаем с пре
 	)
 })
 
-test('site-kit: сравнение версий по major, minor и patch', () => {
+test('site-kit: сравнение версий по major, minor, patch и пререлизу', () => {
 	assert.equal(atLeast('4.2.0', '4.2.0'), true)
 	assert.equal(atLeast('4.10.0', '4.2.0'), true)
 	assert.equal(atLeast('5.0.0', '4.2.0'), true)
 	assert.equal(atLeast('4.2.1-rc.1', '4.2.0'), true)
+	assert.equal(atLeast('4.2.0-rc.1', '4.2.0'), false)
+	assert.equal(atLeast('4.2.0+build.1', '4.2.0'), true)
 	assert.equal(atLeast('4.1.9', '4.2.0'), false)
 	assert.equal(atLeast('3.9.9', '4.2.0'), false)
 	assert.equal(atLeast('v4.2.0', '4.2.0'), true)

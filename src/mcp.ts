@@ -372,8 +372,6 @@ export class McpServer {
 			this.tmcp.receive(m as never, { ...context, sessionInfo } as never),
 		)
 
-		if (m.method === 'initialize') return stripInitialize(response)
-
 		if (m.method === 'tools/list') return this.#dropTitles(response, 'tools', 'tool')
 
 		if (m.method === 'prompts/list') return dropEmptyArguments(this.#dropTitles(response, 'prompts', 'prompt'))
@@ -481,15 +479,6 @@ function dropEmptyArguments(response: unknown) {
 		?.prompts
 
 	for (const prompt of prompts ?? []) if (prompt.arguments?.length === 0) delete prompt.arguments
-
-	return response
-}
-
-/** tmcp 1.20 кладёт в ответ initialize настройки сервера (`adapter: {}`): клиенту они не нужны. */
-function stripInitialize(response: unknown) {
-	const result = (response as { result?: Record<string, unknown> } | undefined)?.result
-
-	if (result && 'adapter' in result) delete result.adapter
 
 	return response
 }

@@ -67,7 +67,7 @@
 	},
 	"dependencies": {
 		"jose": "6.2.8",
-		"tmcp": "1.20.0"
+		"tmcp": "1.20.1"
 	},
 	"peerDependencies": {
 		"@lucide/svelte": "^1.39.0",

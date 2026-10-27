@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.3.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.2.1...v3.3.0) (2026-10-27)
+
+
+### Features
+
+* report errors to Sentry when SENTRY_DSN is set ([8651c2d](https://github.com/aimuzov/infra-mcp-kit/commit/8651c2d25899e395aaef0c1cb861442cd4503b36))
+* report errors to Sentry when SENTRY_DSN is set ([dc5819c](https://github.com/aimuzov/infra-mcp-kit/commit/dc5819c71890ef77fe7ebdd60d214d32c7a267ab))
+* reuse a Sentry client the server started itself ([ea62822](https://github.com/aimuzov/infra-mcp-kit/commit/ea628220fde02951a31073936e731a6f85e8031b))
+
+
+### Bug Fixes
+
+* harden the Sentry transport and the crash path ([daf51b3](https://github.com/aimuzov/infra-mcp-kit/commit/daf51b36c614041ad4efd363ba9ec982063b18d6))
+* report a crash after a captured error and never send thrown objects ([51b32ca](https://github.com/aimuzov/infra-mcp-kit/commit/51b32ca55cbdc98c345a6d3a8d46818446af0d05))
+* report repeated errors instead of deduping them ([9638529](https://github.com/aimuzov/infra-mcp-kit/commit/963852915de74f9b7d17c60513ca8c6fa975e926))
+* skip a closed Sentry client of the server ([aea50a2](https://github.com/aimuzov/infra-mcp-kit/commit/aea50a27026f2b15d84628693ade7ca87c92c19e))
+* time out a Sentry request that hangs ([99221b1](https://github.com/aimuzov/infra-mcp-kit/commit/99221b13165b58c78adb97ee17a52b76187f2a58))
+
 ## [3.2.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.2.0...v3.2.1) (2026-10-27)
 
 

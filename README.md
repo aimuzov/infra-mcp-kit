@@ -130,7 +130,7 @@ The pages are built without this env, so the server hands them the bot name at r
 - `GET /account/login` is where the widget brings the person back. The kit checks the signature, its age, a replay and the state, sets the session cookie and redirects to `/account` in the language of the page. A link without a signature leads to `/account/signin`, so the "Sign in" of `AccountShell` works as is.
 - `POST /account/logout` clears the session, only from the service's own `Origin`.
 
-A signature works once for both sign-ins: the widget signs only the person and the time, so one spent in `telegramLogin` does not open the account, and the other way round.
+A signature works once for both sign-ins: the widget signs only the person and the time, so one spent in `telegramLogin` does not open the account, and the other way round. The journal of spent signatures lives in the process memory: after a restart or in another process, a signature younger than 10 minutes passes once more.
 
 The state closes login CSRF: without it, someone else's signed link would silently put a person into a stranger's account, and they would upload their data there. `sessions` defaults to the kit's `mcp_session`; pass the same `sessions` your routes read with `requireSession`. `claims(user)` replaces `{ name }` in the session, `sub` is always the Telegram id.
 
@@ -163,7 +163,7 @@ export default defineConfig({
 })
 ```
 
-- `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm`, `/login/telegram` with `telegram: { grants }` and the account sign-in `/account/signin` with `telegram: { account: true }`. The bot name comes from the server at runtime, `telegram.botName` is only a fallback for a server that sends none. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
+- `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm`, `/login/telegram` with `telegram: { grants }` and the account sign-in `/account/signin` with `telegram: { account: true }`. The bot name comes from the server at runtime. `telegram.botName` is a fallback for `/login/telegram` only, when the server sends none: `/account/signin` takes the bot from `/account/auth` alone, so `telegramAccount` without `botName` does not build unless it is the dev sign-in. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
 - The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
 - A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
 - Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`.
@@ -204,7 +204,7 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `startHttp` listens on a random port of 127.0.0.1.
 - `oauthFlow` runs register, authorize, sign-in, callback and the code exchange. `submitForm`, `telegramSigned` and `devLink` cover the ready sign-ins, `exchangeAgain` and `refresh` check single use.
 - `accountLogin(base, { user, botToken })` signs in to the account through `telegramAccount` like the page and the widget do, and gives the `Cookie` header. `'dev'` takes the dev link instead.
-- `freshTelegramLogin(user, botToken)` signs a sign-in like the widget, each call with its own `auth_date`: the same fields in the same second give the same signature, and the kit takes it for a replay. `telegramSigned` and `accountLogin` sign with it.
+- `freshTelegramLogin(user, botToken)` signs a sign-in like the widget, each call with its own `auth_date`: the same fields in the same second give the same signature, and the kit takes it for a replay. An `auth_date` in `user` replaces the chosen one, and then two calls can give one signature again. `telegramSigned` and `accountLogin` sign with it.
 - `fakePages()` gives a `publicDir` without building Astro.
 
 ## Actions

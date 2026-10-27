@@ -130,7 +130,7 @@ await serveHttp({
 - `GET /account/login` — сюда виджет возвращает человека. Кит проверяет подпись, её возраст, повтор и метку, ставит куку сессии и уводит в `/account` на языке страницы. Ссылка без подписи ведёт на `/account/signin`, поэтому «Войти» из `AccountShell` работает как есть.
 - `POST /account/logout` стирает сессию, только со своего `Origin`.
 
-Подпись годится один раз на оба входа: виджет подписывает только человека и время, поэтому потраченная в `telegramLogin` не откроет кабинет, и наоборот.
+Подпись годится один раз на оба входа: виджет подписывает только человека и время, поэтому потраченная в `telegramLogin` не откроет кабинет, и наоборот. Журнал потраченных подписей живёт в памяти процесса: после рестарта или в соседнем процессе подпись моложе 10 минут пройдёт ещё раз.
 
 Метка закрывает login CSRF: без неё чужая подписанная ссылка тихо пустила бы человека в чужой кабинет, и он загрузил бы туда свои данные. `sessions` по умолчанию — `mcp_session` кита; передай те же `sessions`, по которым твои маршруты зовут `requireSession`. `claims(user)` заменяет `{ name }` в сессии, `sub` — всегда Telegram id.
 
@@ -166,7 +166,7 @@ export default defineConfig({
 })
 ```
 
-- `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm`, `/login/telegram` с `telegram: { grants }` и вход в кабинет `/account/signin` с `telegram: { account: true }`. Имя бота приходит с сервера в рантайме, `telegram.botName` — только запасное для сервера, который его не прислал. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
+- `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm`, `/login/telegram` с `telegram: { grants }` и вход в кабинет `/account/signin` с `telegram: { account: true }`. Имя бота приходит с сервера в рантайме. `telegram.botName` — запасное только для `/login/telegram`, если сервер его не прислал: `/account/signin` берёт бота лишь из `/account/auth`, поэтому `telegramAccount` без `botName` не соберётся, если это не dev-вход. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
 - Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
@@ -207,7 +207,7 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `startHttp` слушает случайный порт на 127.0.0.1.
 - `oauthFlow` проходит регистрацию, авторизацию, вход, колбэк и обмен кода. `submitForm`, `telegramSigned` и `devLink` покрывают готовые способы входа, `exchangeAgain` и `refresh` проверяют одноразовость.
 - `accountLogin(base, { user, botToken })` входит в кабинет через `telegramAccount`, как это делают страница и виджет, и отдаёт заголовок `Cookie`. `'dev'` идёт по dev-ссылке.
-- `freshTelegramLogin(user, botToken)` подписывает вход, как виджет, и у каждого вызова своя `auth_date`: те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. Ей подписывают `telegramSigned` и `accountLogin`.
+- `freshTelegramLogin(user, botToken)` подписывает вход, как виджет, и у каждого вызова своя `auth_date`: те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. `auth_date` из `user` заменяет выбранную, и с ней два вызова снова могут дать одну подпись. Ей подписывают `telegramSigned` и `accountLogin`.
 - `fakePages()` даёт `publicDir` без сборки Astro.
 
 ## Actions

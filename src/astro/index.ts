@@ -55,8 +55,9 @@ export type TokenField = {
 
 export type TelegramPages = {
 	/**
-	 * Имя бота на случай, если сервер его не прислал. Страницы обычно собирают без окружения
-	 * прода, поэтому имя лучше отдать в рантайме: `telegramLogin({ botName })` и `telegramAccount`.
+	 * Имя бота для `/login/telegram` на случай, если сервер его не прислал. `/account/signin`
+	 * берёт бота только из `/account/auth`. Страницы обычно собирают без окружения прода,
+	 * поэтому имя лучше отдать в рантайме: `telegramLogin({ botName })` и `telegramAccount`.
 	 */
 	botName?: string
 	grants?: string[]

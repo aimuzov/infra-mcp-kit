@@ -149,7 +149,7 @@ export default defineConfig({
 - `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm` and `/login/telegram` with `telegram: { botName, grants }`. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
 - The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
 - A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
-- Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`. infra-site-kit goes in as `github:aimuzov/infra-site-kit#v5.5.0`, see [below](#moving-to-infra-site-kit-5).
+- Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`. infra-site-kit goes in as `github:aimuzov/infra-site-kit#v5.8.1`, see [below](#moving-to-infra-site-kit-5).
 
 [`e2e/connector`](e2e/connector) is a working example.
 
@@ -165,10 +165,10 @@ On the first visit the server sends a person whose browser prefers English to `/
 
 ### Moving to infra-site-kit 5
 
-The pages are checked on infra-site-kit 5.5.0, and that is the version to install. The kit's API stays the same, a server only moves its dev dependency:
+The pages are checked on infra-site-kit 5.8.1, and that is the version to install. The kit's API stays the same, a server only moves its dev dependency:
 
 ```bash
-npm install -E -D github:aimuzov/infra-site-kit#v5.5.0
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
 ```
 
 - 5.0 drops the `approach` option of `themePeek`. The kit's theme button never passed it, so only a page of the server that calls `themePeek(node, { approach })` itself has to drop it.
@@ -236,7 +236,7 @@ The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the lan
 
 3.0 runs on [tmcp](https://github.com/paoloricciuti/tmcp) instead of the official SDK and on `node:http` instead of express. A hosted server's runtime goes from 27 MB in 98 packages to 12 MB in 15, 8 MB of it zod. Issued tokens and `auth.db` stay as they are: nobody has to reconnect.
 
-1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4, move infra-site-kit to `#v5.5.0` as [above](#moving-to-infra-site-kit-5). The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
+1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4, move infra-site-kit to `#v5.8.1` as [above](#moving-to-infra-site-kit-5). The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
 2. Imports: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` and the other result types come from `@aimuzov/infra-mcp-kit`. `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` and `server.server.elicitInput()` keep the SDK signatures.
 3. A thrown handler is a result with `isError`, as with `tool()`; the tool list keeps the input schema of the SDK.
 4. `createHttpApp` returns `{ handle, listener, context }`: `handle(request)` takes a `Request` and gives a `Response`, `listener` goes to `node:http`. `startHttp` takes the app itself, `.app` is gone.

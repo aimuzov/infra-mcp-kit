@@ -152,7 +152,7 @@ export default defineConfig({
 - `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
-- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.5.0`, см. [ниже](#переезд-на-infra-site-kit-5).
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.8.1`, см. [ниже](#переезд-на-infra-site-kit-5).
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
@@ -168,10 +168,10 @@ export default defineConfig({
 
 ### Переезд на infra-site-kit 5
 
-Страницы проверены на infra-site-kit 5.5.0, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
+Страницы проверены на infra-site-kit 5.8.1, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
 
 ```bash
-npm install -E -D github:aimuzov/infra-site-kit#v5.5.0
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
 ```
 
 - 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
@@ -239,7 +239,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 
 3.0 работает на [tmcp](https://github.com/paoloricciuti/tmcp) вместо официального SDK и на `node:http` вместо express. Рантайм размещённого сервера худеет с 27 МБ в 98 пакетах до 12 МБ в 15, из них 8 МБ — zod. Выданные токены и `auth.db` остаются как есть: переподключаться никому не придётся.
 
-1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4, переведи infra-site-kit на `#v5.5.0`, как [выше](#переезд-на-infra-site-kit-5). SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
+1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4, переведи infra-site-kit на `#v5.8.1`, как [выше](#переезд-на-infra-site-kit-5). SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
 2. Импорты: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` и другие типы результатов берутся из `@aimuzov/infra-mcp-kit`. У `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` и `server.server.elicitInput()` сигнатуры SDK.
 3. Исключение в обработчике — результат с `isError`, как у `tool()`; в списке инструментов схема входа та же, что у SDK.
 4. `createHttpApp` отдаёт `{ handle, listener, context }`: `handle(request)` принимает `Request` и отдаёт `Response`, `listener` идёт в `node:http`. `startHttp` принимает само приложение, `.app` больше нет.

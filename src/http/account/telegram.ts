@@ -11,13 +11,14 @@ import {
 	type TelegramUser,
 } from '#kit/http/login/telegram'
 import { ownClaims } from '#kit/http/oauth/tokens'
-import { sessions as cookieSessions, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
+import { sessions as cookieSessions, hostCookie, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
 	 * Сессии кабинета: те же, по которым свои маршруты сервиса зовут `requireSession`.
-	 * По умолчанию `sessions(context.tokens, publicUrl)` с cookie `mcp_session`.
+	 * По умолчанию `sessions(context.tokens, publicUrl)` с cookie `mcp_session`, на https --
+	 * `__Host-mcp_session`.
 	 */
 	sessions?: Sessions
 	/** Claims сессии по пользователю. По умолчанию `{ name }` из имени или ника; `sub` -- его Telegram id. */
@@ -38,7 +39,11 @@ export type TelegramAccountAuth = {
 	state: string
 }
 
-/** Cookie с меткой страницы входа: живёт, пока годится подпись виджета. */
+/**
+ * Cookie с меткой страницы входа: живёт, пока годится подпись виджета.
+ * На https она `__Host-mcp_signin` (см. `hostCookie`), иначе соседний
+ * поддомен подложил бы свою метку.
+ */
 export const SIGNIN_COOKIE = 'mcp_signin'
 
 /**
@@ -68,9 +73,9 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 		const url = new URL(request.url)
 		const route = `${request.method} ${localizePath(url.pathname, DEFAULT_LOCALE)}`
 		const { publicUrl } = context.config
-		const secure = isLoopback(publicUrl) ? '' : '; Secure'
+		const signin = hostCookie(SIGNIN_COOKIE, publicUrl)
 		const signinCookie = (value: string, maxAge: number) =>
-			`${SIGNIN_COOKIE}=${value}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure}`
+			`${signin.name}=${value}; Max-Age=${maxAge}; ${signin.attributes}`
 
 		// Сессии и dev-вход берём по приложению каждого запроса: один маршрут могут отдать
 		// и локальному приложению, и проду.
@@ -109,7 +114,7 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 			// Ссылка "Войти" без подписи, например из `AccountShell`: ведём на страницу входа.
 			if (!query.hash && query.dev !== '1') return redirect(localizePath(page, locale))
 
-			const state = readCookie(request, SIGNIN_COOKIE)
+			const state = readCookie(request, signin.name)
 
 			if (!state || query.state !== state) return fail('account.signinAgain')
 

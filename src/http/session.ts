@@ -1,6 +1,5 @@
 import { kt, requestLocale } from '#kit/i18n'
 
-import { isLoopback } from './config.ts'
 import { apiError } from './json.ts'
 import type { TokenClaims, Tokens } from './oauth/tokens.ts'
 
@@ -29,22 +28,68 @@ export type Sessions = {
 	clearCookie(): string
 }
 
-/** Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax. */
+/**
+ * Имя и атрибуты cookie входа. На https имя с префиксом `__Host-`: такую cookie
+ * браузер примет только от самого хоста, с Secure, `Path=/` и без `Domain`.
+ * Без префикса сайт на соседнем поддомене поставит cookie с тем же именем
+ * на общий родительский домен, сервер прочтёт её вместо своей, и человек
+ * окажется в чужом кабинете. На http-localhost префикс не годится: браузер
+ * не примет его без Secure.
+ */
+export function hostCookie(name: string, publicUrl: URL): { name: string; attributes: string } {
+	const https = publicUrl.protocol === 'https:'
+
+	return {
+		name: https ? `__Host-${name}` : name,
+		attributes: ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(https ? ['Secure'] : [])].join('; '),
+	}
+}
+
+/** Помечает сессии под `__Host-` cookie: старое имя без префикса их не примет. */
+const HOST_CLAIM = 'host_cookie'
+
+/**
+ * Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax,
+ * на https -- `__Host-<cookie>` (см. `hostCookie`).
+ *
+ * Сессии, выданные до префикса, живут под прежним `<cookie>`, и `read` берёт
+ * их оттуда, пока нет `__Host-` cookie. Только их: новую сессию под старым
+ * именем мог подложить соседний поддомен, поэтому у новых есть claim,
+ * которого нет у старых.
+ */
 export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session'): Sessions {
-	const attributes = ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(isLoopback(publicUrl) ? [] : ['Secure'])].join('; ')
+	const { name, attributes } = hostCookie(cookie, publicUrl)
+	const prefixed = name !== cookie
 
 	return {
 		async read(request) {
-			const token = readCookie(request, cookie)
+			const token = readCookie(request, name)
 
-			return token ? tokens.verify('session', token) : null
+			if (token !== undefined || !prefixed) {
+				const claims = token ? await tokens.verify('session', token) : null
+
+				if (claims) delete claims[HOST_CLAIM]
+
+				return claims
+			}
+
+			const legacy = readCookie(request, cookie)
+			const claims = legacy ? await tokens.verify('session', legacy) : null
+
+			return claims && !(HOST_CLAIM in claims) ? claims : null
 		},
 		async cookie(claims) {
-			const value = encodeURIComponent(await tokens.sign('session', claims))
+			const token = await tokens.sign('session', prefixed ? { ...claims, [HOST_CLAIM]: true } : claims)
 
-			return `${cookie}=${value}; Max-Age=${tokens.ttl.session}; ${attributes}`
+			return `${name}=${encodeURIComponent(token)}; Max-Age=${tokens.ttl.session}; ${attributes}`
 		},
-		clearCookie: () => `${cookie}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
+		// Старую cookie без префикса тем же заголовком не стереть. Поэтому на https
+		// остаётся пустая `__Host-` cookie: пока она есть, старое имя не читается,
+		// а живёт она дольше любой старой сессии.
+		clearCookie: () =>
+			prefixed
+				? `${name}=; Max-Age=${tokens.ttl.session}; ${attributes}`
+				: `${name}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
 	}
 }
 

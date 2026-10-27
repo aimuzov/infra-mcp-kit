@@ -6,6 +6,7 @@ import { fakePages, startHttp, type RunningHttp } from '#kit/testing/index'
 
 import { createHttpApp } from './app.ts'
 import { apiError, errorPage, requireSession, sendJson } from './json.ts'
+import { Tokens } from './oauth/tokens.ts'
 import { sameOrigin, sessions } from './session.ts'
 
 const SECRET = 'x'.repeat(32)
@@ -90,14 +91,17 @@ describe('кабинет: сессия по cookie', () => {
 		assert.match(logout.headers.get('set-cookie') ?? '', /mcp_session=;.*Expires=Thu, 01 Jan 1970/i)
 	})
 
-	test('за https cookie помечается Secure', async () => {
+	test('за https cookie -- __Host- и Secure', async () => {
 		const base = await start('https://mcp.example.com')
 		const login = await fetch(`${base}/account/login`, {
 			method: 'POST',
 			headers: { origin: 'https://mcp.example.com' },
 		})
 
-		assert.match(login.headers.get('set-cookie') ?? '', /Secure/i)
+		assert.match(
+			login.headers.get('set-cookie') ?? '',
+			/^__Host-mcp_session=.+; Max-Age=\d+; Path=\/; HttpOnly; SameSite=Lax; Secure$/,
+		)
 	})
 
 	test('без cookie, с чужой или битой cookie /account/state отвечает 401 JSON', async () => {
@@ -122,6 +126,51 @@ describe('кабинет: сессия по cookie', () => {
 			assert.equal(((await res.json()) as { error: { code: string } }).error.code, 'forbidden_origin')
 			assert.equal(res.headers.get('set-cookie'), null)
 		}
+	})
+})
+
+describe('кабинет за https: __Host- cookie', () => {
+	const publicUrl = new URL('https://thinks.example.com')
+	const tokens = new Tokens({ secret: SECRET, issuer: publicUrl.href })
+	// Как у thinks: своё имя cookie, выданное ещё без префикса.
+	const cabinet = sessions(tokens, publicUrl, 'thinks_session')
+	const read = (cookie: string) =>
+		cabinet.read(new Request('https://thinks.example.com/account', { headers: { cookie } }))
+	const valueOf = (setCookie: string) => setCookie.slice(setCookie.indexOf('=') + 1, setCookie.indexOf(';'))
+
+	test('новая сессия под старым именем не годится: её подложил соседний поддомен', async () => {
+		const mine = valueOf(await cabinet.cookie({ sub: 'me' }))
+		const stranger = valueOf(await cabinet.cookie({ sub: 'stranger' }))
+
+		assert.equal((await read(`__Host-thinks_session=${mine}`))?.sub, 'me')
+		// Свою сессию злоумышленник видит в своём браузере и кладёт её на родительский домен.
+		assert.equal(await read(`thinks_session=${stranger}`), null)
+		assert.equal((await read(`thinks_session=${stranger}; __Host-thinks_session=${mine}`))?.sub, 'me')
+	})
+
+	test('сессия, выданная до префикса, живёт под старым именем до выхода', async () => {
+		// Так подписывал старый кит: без claim новой cookie.
+		const legacy = encodeURIComponent(await tokens.sign('session', { sub: 'old' }))
+		const fresh = valueOf(await cabinet.cookie({ sub: 'new' }))
+
+		assert.equal((await read(`thinks_session=${legacy}`))?.sub, 'old')
+		assert.equal((await read(`thinks_session=${legacy}; __Host-thinks_session=${fresh}`))?.sub, 'new')
+
+		const clear = cabinet.clearCookie()
+
+		// После выхода старая cookie ещё в браузере, но пустая __Host- закрывает к ней дорогу.
+		assert.equal(
+			clear,
+			`__Host-thinks_session=; Max-Age=${tokens.ttl.session}; Path=/; HttpOnly; SameSite=Lax; Secure`,
+		)
+
+		assert.equal(await read(`thinks_session=${legacy}; __Host-thinks_session=`), null)
+	})
+
+	test('claim новой cookie не виден сервису', async () => {
+		const claims = await read(`__Host-thinks_session=${valueOf(await cabinet.cookie({ sub: 'me', name: 'Ivan' }))}`)
+
+		assert.deepEqual(Object.keys(claims ?? {}).sort(), ['exp', 'iat', 'iss', 'kind', 'name', 'sub'])
 	})
 })
 

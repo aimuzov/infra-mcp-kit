@@ -307,16 +307,53 @@ describe('вход в кабинет через Telegram', () => {
 		assert.throws(() => telegramAccount({ botToken: '', botName: 'test_bot' }), /botToken/)
 	})
 
-	test('за https метка помечается Secure', async () => {
+	test('за https метка и сессия -- __Host- cookie, подложенные без префикса не годятся', async () => {
+		const prod = 'https://mcp.example.com'
 		const app = createHttpApp({
-			config: loadHttpConfig({ AUTH_SECRET: SECRET, PUBLIC_URL: 'https://mcp.example.com' }),
+			config: loadHttpConfig({ AUTH_SECRET: SECRET, PUBLIC_URL: prod }),
 			service: { name: 'test' },
 			createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
-			routes: telegramAccount({ botToken: BOT, botName: 'test_bot' }),
+			routes: [telegramAccount({ botToken: BOT, botName: 'test_bot' }), state()],
 		})
-		const res = await app.handle(new Request('https://mcp.example.com/account/auth'))
+		const get = (path: string | URL, cookie = '') =>
+			app.handle(new Request(new URL(path, prod), { headers: cookie ? { cookie } : {} }))
 
-		assert.match(res.headers.get('set-cookie') ?? '', /; Secure$/)
+		/** Своя страница входа и подписанная ссылка виджета на неё. */
+		const signin = async (user = IVAN) => {
+			const auth = await get('/account/auth')
+			const setCookie = auth.headers.get('set-cookie') ?? ''
+			const { state: label } = (await auth.json()) as { state: string }
+			const url = new URL(`/account/login?state=${label}`, prod)
+
+			for (const [key, value] of Object.entries(freshTelegramLogin(user, BOT))) url.searchParams.set(key, value)
+
+			return { setCookie, label, url }
+		}
+
+		const mine = await signin()
+
+		assert.match(mine.setCookie, /^__Host-mcp_signin=[\w-]+; Max-Age=600; Path=\/; HttpOnly; SameSite=Lax; Secure$/)
+
+		// Злоумышленник прошёл вход сам и положил свою метку на родительский домен
+		// без префикса: браузер человека пришлёт её, но кит читает только __Host-.
+		const stranger = await signin({ id: '666', first_name: 'Mallory' })
+		const planted = await get(stranger.url, `mcp_signin=${stranger.label}`)
+
+		assert.equal(errorOf(planted).code, 'login')
+		assert.equal(planted.headers.getSetCookie().length, 0)
+
+		const login = await get(mine.url, `__Host-mcp_signin=${mine.label}`)
+		const [session, cleared] = login.headers.getSetCookie()
+
+		assert.equal(login.headers.get('location'), '/account')
+		assert.match(session ?? '', /^__Host-mcp_session=.+; Path=\/; HttpOnly; SameSite=Lax; Secure$/)
+		assert.match(cleared ?? '', /^__Host-mcp_signin=; Max-Age=0;/)
+
+		const pair = session?.split(';')[0] ?? ''
+
+		assert.equal((await get('/account/state', pair)).status, 200)
+		// Ту же сессию без префикса мог положить соседний поддомен.
+		assert.equal((await get('/account/state', pair.replace(/^__Host-/, ''))).status, 401)
 	})
 })
 

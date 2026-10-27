@@ -106,6 +106,10 @@ The sign-in context, the signed request, the client and the previous error, trav
 
 For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession(sessions, request)` gives the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 to a foreign `Origin`, `sendJson` and `apiError` build responses in one shape.
 
+Over https the sign-in cookies carry the `__Host-` prefix, a custom session name too. The browser accepts such a cookie only from the host itself, so a sibling subdomain cannot plant its own session or sign-in state through the shared parent domain. On http localhost the names have no prefix.
+
+A session issued before the prefix is still read by `sessions` under its old name until it expires or the person logs out. A new one under the old name is refused.
+
 ### Telegram
 
 ```ts
@@ -126,13 +130,13 @@ The pages are built without this env, so the server hands them the bot name at r
 
 `telegramAccount` signs a person in to the account with Telegram and keeps them in the session cookie:
 
-- `GET /account/auth` gives the sign-in page the bot name and the dev id, and a one-time state in an httpOnly cookie for 10 minutes.
+- `GET /account/auth` gives the sign-in page the bot name and the dev id, and a one-time state in the httpOnly `mcp_signin` cookie for 10 minutes.
 - `GET /account/login` is where the widget brings the person back. The kit checks the signature, its age, a replay and the state, sets the session cookie and redirects to `/account` in the language of the page. A link without a signature leads to `/account/signin`, so the "Sign in" of `AccountShell` works as is.
 - `POST /account/logout` clears the session, only from the service's own `Origin`.
 
 A signature works once for both sign-ins: the widget signs only the person and the time, so one spent in `telegramLogin` does not open the account, and the other way round. The journal of spent signatures lives in the process memory: after a restart or in another process, a signature younger than 10 minutes passes once more.
 
-The state closes login CSRF: without it, someone else's signed link would silently put a person into a stranger's account, and they would upload their data there. `sessions` defaults to the kit's `mcp_session`; pass the same `sessions` your routes read with `requireSession`. `claims(user)` replaces `{ name }` in the session, `sub` is always the Telegram id.
+The state closes login CSRF: without it, someone else's signed link would silently put a person into a stranger's account, and they would upload their data there. `sessions` defaults to the kit's `mcp_session`, `__Host-mcp_session` over https; pass the same `sessions` your routes read with `requireSession`. `claims(user)` replaces `{ name }` in the session, `sub` is always the Telegram id.
 
 ## Pages
 

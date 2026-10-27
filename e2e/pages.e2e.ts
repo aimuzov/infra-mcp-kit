@@ -401,9 +401,10 @@ describe('языки', () => {
 
 		await page.goto(url)
 		await page.locator('input[name="token"]').fill('bad')
-		await page.locator('button[type="submit"]').click()
-		await page.waitForURL(/\/en\/login/)
-		assert.match(await page.locator('main').innerText(), /The token did not fit/)
+		// Ждём адрес с ошибкой: `/en/login` был и до отправки, текст читался бы со старой.
+		await Promise.all([page.waitForURL(/\/en\/login#.*error=/), page.locator('button[type="submit"]').click()])
+		await page.waitForSelector('[role=alert]')
+		assert.match(await page.locator('[role=alert]').innerText(), /The token did not fit/)
 		await context.close()
 	})
 

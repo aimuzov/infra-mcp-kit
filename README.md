@@ -69,6 +69,7 @@ Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. 
 - Sent: uncaught exceptions and rejections (the process still exits with 1, once the event is out), errors of tool, prompt and resource handlers, including the ones the client gets back as `isError`, tagged `mcp.tool`, `mcp.prompt` or `mcp.resource`, failed HTTP, `/mcp` and OAuth requests and sign-ins tagged `http.path`, and an error that stops `runCli`.
 - Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, so user data has no place in error messages.
 - Errors only, no traces. The client is `@sentry/core` instead of `@sentry/node`: 13 MB instead of 80, no OpenTelemetry and no breadcrumbs from the console or outgoing requests.
+- A server that called `Sentry.init` itself before `runCli`, from any SDK version, gets no second client: the kit sends its errors through the server's client with the same tags and does not read `SENTRY_DSN`.
 - A server without `runCli` calls `await initSentry({ name, version })` itself. `captureError(error, tags)` sends an error the server caught on its own, `withTags(tags, run)` tags every error inside `run`.
 
 ## HTTP and OAuth

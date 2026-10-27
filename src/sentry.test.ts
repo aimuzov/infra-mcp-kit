@@ -190,6 +190,66 @@ describe('sentry', () => {
 		)
 	})
 
+	// Сервер вроде kaiten-mcp зовёт `Sentry.init` из своего `@sentry/node` до `runCli`. Его ядро
+	// другой версии, и состояние SDK лежит под другим ключом `__SENTRY__`: так и эмулируем.
+	test('если сервер уже завёл Sentry, кит шлёт через его клиент и не заводит второй', async () => {
+		const script = `
+			const core = await import('@sentry/core')
+			const { ServerRuntimeClient } = await import('@sentry/core/server')
+			const events = []
+
+			core.initAndBind(ServerRuntimeClient, {
+				dsn: 'https://public@o0.ingest.sentry.io/1',
+				release: 'own@1.0.0',
+				integrations: [],
+				stackParser: core.createStackParser(),
+				transport: () => ({
+					send: async (envelope) => {
+						for (const [header, body] of envelope[1]) if (header.type === 'event') events.push(body)
+
+						return {}
+					},
+					flush: async () => true,
+				}),
+			})
+
+			const carriers = globalThis.__SENTRY__
+			carriers['0.0.0-server'] = carriers[core.SDK_VERSION]
+			delete carriers[core.SDK_VERSION]
+
+			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
+			const enabled = await kit.initSentry({ name: 'kit-test', version: '1.2.3', env: {} })
+
+			kit.withTags({ 'mcp.tool': 'pay' }, () => kit.captureError(new Error('via server')))
+			await kit.flushSentry()
+			console.log(JSON.stringify({ enabled, events, listeners: process.listenerCount('uncaughtException') }))
+		`
+		const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+			env: { ...process.env, SENTRY_DSN: '' },
+			stdio: ['ignore', 'pipe', 'inherit'],
+		})
+		let stdout = ''
+
+		child.stdout.on('data', (chunk) => (stdout += chunk))
+
+		const [code] = await once(child, 'exit')
+
+		assert.equal(code, 0)
+
+		const { enabled, events, listeners } = JSON.parse(stdout) as {
+			enabled: boolean
+			events: Event[]
+			listeners: number
+		}
+
+		assert.equal(enabled, true)
+		assert.equal(listeners, 0, 'обработчики падения ставит сам сервер, кит свои не добавляет')
+		assert.equal(events.length, 1)
+		assert.equal(events[0]?.release, 'own@1.0.0')
+		assert.equal(events[0]?.tags?.['mcp.tool'], 'pay')
+		assert.equal(events[0]?.exception?.values[0]?.value, 'via server')
+	})
+
 	// Отдельный процесс: здесь SDK уже включён с подменённым транспортом, а проверить нужно
 	// настоящую отправку по сети и падение процесса. Вместо Sentry -- локальный сервер.
 	for (const [kind, crash] of [

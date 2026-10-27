@@ -19,8 +19,9 @@ type ForeignScope = {
 	clone(): ForeignScope
 	setTags(tags: Tags): unknown
 	captureException(error: unknown): unknown
-	getClient(): { flush(timeout: number): PromiseLike<unknown> } | undefined
+	getClient(): ForeignClient | undefined
 }
+type ForeignClient = { flush(timeout: number): PromiseLike<unknown>; getOptions?(): { enabled?: boolean } }
 type Carrier = { acs?: { getCurrentScope?(): ForeignScope }; defaultCurrentScope?: ForeignScope }
 
 export type SentryOptions = {
@@ -115,7 +116,7 @@ function foreignReporter(): Reporter | undefined {
 		const current = () => carrier.acs?.getCurrentScope?.() ?? carrier.defaultCurrentScope
 		const client = current()?.getClient()
 
-		if (!client) continue
+		if (!client || isClosed(client)) continue
 
 		return {
 			capture(error, tags) {
@@ -130,6 +131,13 @@ function foreignReporter(): Reporter | undefined {
 
 	return undefined
 }
+
+/**
+ * После `Sentry.close()` клиент остаётся в scope, но уже ничего не шлёт. Метка в реестре
+ * `Symbol.for` общая для всех версий SDK, `enabled: false` -- на случай версии без неё.
+ */
+const isClosed = (client: ForeignClient) =>
+	Symbol.for('SentryClosedClient') in client || client.getOptions?.().enabled === false
 
 /** Сеть через `fetch` из Node: своего HTTP-клиента `@sentry/core` не везёт. */
 const fetchTransport = (sentry: Core) => (options: BaseTransportOptions) =>

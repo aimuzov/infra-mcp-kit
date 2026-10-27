@@ -233,6 +233,19 @@ describe('sentry', () => {
 			carriers['0.0.0-server'] = carriers[core.SDK_VERSION]
 			delete carriers[core.SDK_VERSION]
 
+			// Закрытый клиент другой копии SDK лежит первым: кит его пропускает.
+			const closed = new ServerRuntimeClient({
+				dsn: 'https://public@o0.ingest.sentry.io/2',
+				integrations: [],
+				stackParser: core.createStackParser(),
+				transport: () => ({ send: async () => ({}), flush: async () => true }),
+			})
+			const scope = new core.Scope()
+
+			scope.setClient(closed)
+			await closed.close()
+			globalThis.__SENTRY__ = { '0.0.0-closed': { defaultCurrentScope: scope }, ...carriers }
+
 			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
 			const enabled = await kit.initSentry({ name: 'kit-test', version: '1.2.3', env: {} })
 

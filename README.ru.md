@@ -180,6 +180,27 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `oauthFlow` проходит регистрацию, авторизацию, вход, колбэк и обмен кода. `submitForm`, `telegramSigned` и `devLink` покрывают готовые способы входа, `exchangeAgain` и `refresh` проверяют одноразовость.
 - `fakePages()` даёт `publicDir` без сборки Astro.
 
+### Страницы в Chromium
+
+`fakePages()` только подменяет страницы: острова и CSP остаются непроверенными, а CSP режет инлайн-код молча, это видно лишь в консоли браузера. Такие тесты идут на настоящей сборке Astro в Chromium, как [`e2e/pages.e2e.ts`](e2e/pages.e2e.ts) у кита:
+
+- `playwright` ставится в devDependencies, тесты лежат в `*.e2e.ts`: глоб юнит-тестов и покрытие их не берут.
+- Скрипт `test:ui` собирает сервер и запускает их, например `npm run build && node --test e2e/*.e2e.ts`. В CI их гоняет [`ui: true`](#chromium-в-ci).
+- Строка `Refused to` в консоли или ошибка страницы валит тест.
+
+`page.route` не ловит цель редиректа: Playwright зовёт обработчик только для первого адреса цепочки. Колбэк клиента после POST формы -- как раз такая цель, поэтому тест ждёт сам запрос:
+
+```ts
+const [request] = await Promise.all([
+	page.waitForRequest((r) => r.url().startsWith('http://127.0.0.1:9/cb')),
+	page.click('button[type=submit]'),
+])
+
+assert.ok(new URL(request.url()).searchParams.get('code'))
+```
+
+Этот адрес клиент регистрирует как redirect URI. Порт 9 никто не слушает: тесту нужен запрос, а не ответ.
+
 ## Actions
 
 `.github/workflows/check.yml` сервера:
@@ -200,15 +221,55 @@ jobs:
 
 Это composite actions: job остаётся в сервере, поэтому обязательная проверка `check` не меняет имени.
 
+Необязательные входы `check`:
+
+- `coverage-lines: 95` валит проверку при покрытии строк ниже 95%. Скрипт `test` должен начинаться с `node`: флаги покрытия action ставит сразу за ним, потому что ни в `NODE_OPTIONS`, ни после глоба тестов Node их не принимает. Тесты, `*.e2e.ts` и хелперы из `testing/` в счёт не идут.
+- `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу, см. [Два tsconfig](#два-tsconfig).
+- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright, см. [Chromium в CI](#chromium-в-ci).
+
+### Два tsconfig
+
+Сервер работает в Node, страницы собирает Vite, и каждую сторону проверяют по её правилам. Node нужны `module: nodenext` и расширение в каждом относительном импорте, а `astro/tsconfigs/strict` ищет модули как бандлер.
+
+Один конфиг на обе стороны проверяет одну из них по чужим правилам: под `bundler` импорт сервера без расширения проходит `tsc` и падает в Node. Поэтому у сервера со страницами два конфига.
+
+`astro check` и `svelte-check` читают корневой `tsconfig.json`, если `astro-tsconfig` не назвал другой, а `tsc` -- тот, что ему передаёт `npm run typecheck`. Корень может достаться любой стороне:
+
+- **Серверу**, как в ките; новые серверы и шаблон берут эту схему. В `tsconfig.json` настройки Node, он покрывает `src` и тесты `*.e2e.ts` и не берёт `src/frontend`, `typecheck` -- это `tsc`. Страницы получают `tsconfig.astro.json` ниже, проверка -- `astro-tsconfig: tsconfig.astro.json`.
+- **Страницам**, как в [thinks-mcp](https://github.com/aimuzov/thinks-mcp). `tsconfig.json` -- тот, что ниже, сервер переезжает в `tsconfig.node.json`, а `typecheck` -- это `tsc -p tsconfig.node.json`. Входы action не нужны.
+
+```json
+{
+	"extends": "astro/tsconfigs/strict",
+	"include": [".astro/types.d.ts", "src/frontend"]
+}
+```
+
+`tsconfig.build.json` в обеих схемах расширяет конфиг сервера. Если остров берёт типы из сервера через `imports` со своим условием, как `#thinks/*` в thinks-mcp, конфиг страниц повторяет `customConditions` сервера.
+
+### Chromium в CI
+
+Серверы, которые гоняли `test:ui` до 2.1, скопировали в свой `check.yml` четыре шага: версию Playwright, `actions/cache` для `~/.cache/ms-playwright`, `npx playwright install --with-deps chromium` и `npm run test:ui`. `ui: true` делает то же внутри action, так что шаги уходят, а их место занимает вход:
+
+```yaml
+steps:
+    - uses: aimuzov/infra-mcp-kit/check@v3
+      with:
+          docker: deploy/Dockerfile
+          ui: true
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+          name: screens
+          path: test-results/screens
+          if-no-files-found: ignore
+```
+
+Выгрузка скриншотов остаётся в сервере: action не знает, куда их кладут тесты. `playwright` остаётся в devDependencies, версию браузера action берёт из него. Тесты в браузере теперь идут сразу после сборки, до smoke-запусков и Docker-образа.
+
 ## Релизы
 
 release-please через [aimuzov/.github](https://github.com/aimuzov/.github) ведёт релизный PR. Его мёрж выпускает релиз, проверки проходят ещё раз, и мажорный тег `v3` переезжает на него, поэтому `check@v3` подхватывает патчи.
-
-Необязательные входы action:
-
-- `coverage-lines: 95` валит проверку при покрытии строк ниже 95%. Скрипт `test` должен начинаться с `node`: флаги покрытия action ставит сразу за ним, потому что ни в `NODE_OPTIONS`, ни после глоба тестов Node их не принимает. Тесты, `*.e2e.ts` и хелперы из `testing/` в счёт не идут.
-- `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
-- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
 
 Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
 
@@ -223,7 +284,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 5. `routes(request, context)` отдаёт `Response` или `undefined`, чтобы пропустить запрос дальше. `requireSession(sessions, request)` отдаёт сессию или `Response` 401, `sameOrigin(publicUrl, request)` — 403 или `undefined`. `sendJson(body, status, headers)` и `apiError(status, code, message)` отдают `Response`. У `sessions` теперь `cookie(claims)` и `clearCookie()` — значения `Set-Cookie`.
 6. Свой `Login.complete` получает `{ request, method, query, form }` вместо запроса express: форму кит уже прочитал.
 7. `mountOAuth` теперь `oauthRouter` с `handle(request)` и `authenticate(request)`. Ошибки у него свои, классы `OAuthError` кита.
-8. CI: `aimuzov/infra-mcp-kit/check@v3`.
+8. CI: `aimuzov/infra-mcp-kit/check@v3`. Скопированные шаги Chromium уступают место [`ui: true`](#chromium-в-ci), а общий для сервера и страниц корневой tsconfig делится [на два](#два-tsconfig).
 
 По HTTP сервер по-прежнему живёт один запрос, как в 2.x: elicitation работает только по stdio, прогресс приходит в потоке SSE самого вызова.
 
@@ -231,7 +292,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 
 2.0 отказывается от HTML, который сервер рисовал на запрос: все страницы собирает Astro.
 
-1. Добавь страницы: dev-зависимости выше, `astro.config.mjs` с `mcpPages()`, `svelte.config.js` и `postcss.config.mjs`. `npm run build` становится `tsc` и затем `astro build`.
+1. Добавь страницы: dev-зависимости выше, `astro.config.mjs` с `mcpPages()`, `svelte.config.js` и `postcss.config.mjs`. `npm run build` становится `tsc` и затем `astro build`. У страниц свой tsconfig, см. [Два tsconfig](#два-tsconfig).
 2. Передай `publicDir` в `createHttpApp` или `serveHttp`, с `auth` он обязателен. `landing` убран, `service` — только `{ name }`: репозиторий, акцент и тексты переехали в `mcpPages`.
 3. У `telegramLogin` больше нет `botName` и `grants`, у `tokenFormLogin` — `title`, `lead` и `submit`: они живут в `mcpPages`. Свой `Login` заменяет `render` на `page`, путь к своей статической странице.
 4. Убраны `ui`, `html`, `raw`, `escapeHtml`, `SafeHtml` и ассеты `/_kit/*`. Кабинет — это страница сервиса с островом в `AccountShell`, который обслуживают `requireSession` и `sendJson`.

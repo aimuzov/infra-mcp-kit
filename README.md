@@ -177,6 +177,27 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `oauthFlow` runs register, authorize, sign-in, callback and the code exchange. `submitForm`, `telegramSigned` and `devLink` cover the ready sign-ins, `exchangeAgain` and `refresh` check single use.
 - `fakePages()` gives a `publicDir` without building Astro.
 
+### Pages in Chromium
+
+`fakePages()` only stands in for the pages: the islands and the CSP stay unchecked, and the CSP cuts inline code silently, only the browser console shows it. These tests run on the real Astro build in Chromium, like [`e2e/pages.e2e.ts`](e2e/pages.e2e.ts) of the kit:
+
+- `playwright` goes to devDependencies, the tests to `*.e2e.ts`: the unit test glob and the coverage leave them out.
+- The `test:ui` script builds the server and runs them, e.g. `npm run build && node --test e2e/*.e2e.ts`. In CI they run with [`ui: true`](#chromium-in-ci).
+- A `Refused to` line in the console or a page error fails the test.
+
+`page.route` doesn't catch the target of a redirect: Playwright calls the handler only for the first URL of a chain. The client's callback after the form POST is such a target, so the test waits for the request itself:
+
+```ts
+const [request] = await Promise.all([
+	page.waitForRequest((r) => r.url().startsWith('http://127.0.0.1:9/cb')),
+	page.click('button[type=submit]'),
+])
+
+assert.ok(new URL(request.url()).searchParams.get('code'))
+```
+
+The client registers this address as its redirect URI. Nothing listens on port 9: the test needs the request, not the answer.
+
 ## Actions
 
 `.github/workflows/check.yml` of a server:
@@ -197,15 +218,55 @@ jobs:
 
 Both are composite actions: the job stays in the server, so the required `check` status keeps its name.
 
+Optional inputs of `check`:
+
+- `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
+- `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server, see [Two tsconfigs](#two-tsconfigs).
+- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version, see [Chromium in CI](#chromium-in-ci).
+
+### Two tsconfigs
+
+The server runs in Node, the pages are built by Vite, and each side is checked by its own rules. Node wants `module: nodenext` and an extension in every relative import, while `astro/tsconfigs/strict` resolves modules like a bundler.
+
+One config for both checks one side by the other's rules: under `bundler` a server import without the extension passes `tsc` and fails in Node. So a server with pages keeps two configs.
+
+`astro check` and `svelte-check` read the root `tsconfig.json` unless `astro-tsconfig` names another, `tsc` reads the one `npm run typecheck` gives it. Either side can own the root:
+
+- **The server**, as in the kit; new servers and the template take this layout. `tsconfig.json` holds the Node settings, covers `src` and the `*.e2e.ts` tests and leaves out `src/frontend`, `typecheck` is `tsc`. The pages get `tsconfig.astro.json` below, the check gets `astro-tsconfig: tsconfig.astro.json`.
+- **The pages**, as in [thinks-mcp](https://github.com/aimuzov/thinks-mcp). `tsconfig.json` is the one below, the server moves to `tsconfig.node.json` and `typecheck` is `tsc -p tsconfig.node.json`. The action needs no input.
+
+```json
+{
+	"extends": "astro/tsconfigs/strict",
+	"include": [".astro/types.d.ts", "src/frontend"]
+}
+```
+
+`tsconfig.build.json` extends the server's config in both layouts. When an island imports types from the server through `imports` with a custom condition, like `#thinks/*` in thinks-mcp, the pages' config repeats the server's `customConditions`.
+
+### Chromium in CI
+
+Servers that ran `test:ui` before 2.1 copied four steps into their `check.yml`: the Playwright version, `actions/cache` of `~/.cache/ms-playwright`, `npx playwright install --with-deps chromium` and `npm run test:ui`. `ui: true` does the same inside the action, so the steps go and the input takes their place:
+
+```yaml
+steps:
+    - uses: aimuzov/infra-mcp-kit/check@v3
+      with:
+          docker: deploy/Dockerfile
+          ui: true
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+          name: screens
+          path: test-results/screens
+          if-no-files-found: ignore
+```
+
+The screenshot upload stays in the server: the action doesn't know where the tests put them. `playwright` stays in devDependencies, the action takes the browser version from it. The browser tests now run right after the build, before the smoke runs and the Docker image.
+
 ## Releases
 
 release-please through [aimuzov/.github](https://github.com/aimuzov/.github) keeps a release PR. Merging it cuts a release, the checks run again and the `v3` major tag moves to it, so `check@v3` follows patches.
-
-Optional inputs of the action:
-
-- `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
-- `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
-- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
 
 The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
 
@@ -220,7 +281,7 @@ The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `st
 5. `routes(request, context)` returns a `Response` or `undefined` to pass the request on. `requireSession(sessions, request)` returns the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 or `undefined`. `sendJson(body, status, headers)` and `apiError(status, code, message)` return a `Response`. `sessions` gives `cookie(claims)` and `clearCookie()`, the values of `Set-Cookie`.
 6. A custom `Login.complete` gets `{ request, method, query, form }` instead of an express request: the kit has already read the form.
 7. `mountOAuth` is `oauthRouter` now, with `handle(request)` and `authenticate(request)`. Its errors are the kit's own `OAuthError` classes.
-8. CI: `aimuzov/infra-mcp-kit/check@v3`.
+8. CI: `aimuzov/infra-mcp-kit/check@v3`. Copied Chromium steps give way to [`ui: true`](#chromium-in-ci), and a root tsconfig shared by the server and the pages splits in [two](#two-tsconfigs).
 
 Over HTTP a server still lives one request, as in 2.x: elicitation works over stdio only, progress comes in the SSE stream of the call.
 
@@ -228,7 +289,7 @@ Over HTTP a server still lives one request, as in 2.x: elicitation works over st
 
 2.0 drops the HTML that the server rendered on request: every page is built by Astro.
 
-1. Add the pages: the dev dependencies above, `astro.config.mjs` with `mcpPages()`, `svelte.config.js` and `postcss.config.mjs`. `npm run build` becomes `tsc` followed by `astro build`.
+1. Add the pages: the dev dependencies above, `astro.config.mjs` with `mcpPages()`, `svelte.config.js` and `postcss.config.mjs`. `npm run build` becomes `tsc` followed by `astro build`. The pages get a tsconfig of their own, see [Two tsconfigs](#two-tsconfigs).
 2. Pass `publicDir` to `createHttpApp` or `serveHttp`, with `auth` it is required. `landing` is gone, `service` is only `{ name }`: the repo, accent and texts moved to `mcpPages`.
 3. `telegramLogin` drops `botName` and `grants`, `tokenFormLogin` drops `title`, `lead` and `submit`: they live in `mcpPages`. A custom `Login` replaces `render` with `page`, the path of its static page.
 4. `ui`, `html`, `raw`, `escapeHtml`, `SafeHtml` and the `/_kit/*` assets are gone. An account page is a page of the service with an island in `AccountShell`, served by `requireSession` and `sendJson`.

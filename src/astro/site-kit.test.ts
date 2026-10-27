@@ -7,6 +7,13 @@ import { pathToFileURL } from 'node:url'
 
 import { assertSiteKit, atLeast, siteKitVersion } from './site-kit.ts'
 
+/** Логгер Astro, который запоминает предупреждения. */
+function logger() {
+	const warnings: string[] = []
+
+	return { warnings, warn: (message: string) => void warnings.push(message) }
+}
+
 test('site-kit: свой site-kit кита проходит минимум, а в peerDependencies его нет', () => {
 	const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
 		peerDependencies: Record<string, string>
@@ -15,7 +22,11 @@ test('site-kit: свой site-kit кита проходит минимум, а �
 	// Со старым site-kit ради конфигов линтеров peer-зависимость уронила бы `npm install`
 	// stdio-серверам без страниц, проверять его -- дело `mcpPages()`.
 	assert.equal(pkg.peerDependencies['@aimuzov/infra-site-kit'], undefined)
-	assert.doesNotThrow(() => assertSiteKit(siteKitVersion()))
+
+	const log = logger()
+
+	assert.doesNotThrow(() => assertSiteKit(siteKitVersion(), log))
+	assert.deepEqual(log.warnings, [])
 })
 
 test('site-kit: версию берём из node_modules выше по дереву, без него -- undefined', (t) => {
@@ -34,14 +45,29 @@ test('site-kit: версию берём из node_modules выше по дере
 })
 
 test('site-kit: старый или пропавший роняет сборку с тем, что поставить', () => {
+	const log = logger()
+
 	assert.throws(
-		() => assertSiteKit('4.1.1'),
+		() => assertSiteKit('4.1.1', log),
 		/infra-site-kit 4\.2\.0 или новее, стоит 4\.1\.1: npm i -D github:aimuzov\/infra-site-kit#v4\.2\.0/,
 	)
 
-	assert.throws(() => assertSiteKit(undefined), /а её нет/)
-	assert.doesNotThrow(() => assertSiteKit('4.2.0'))
-	assert.doesNotThrow(() => assertSiteKit('5.5.0'))
+	assert.throws(() => assertSiteKit(undefined, log), /а её нет/)
+	assert.doesNotThrow(() => assertSiteKit('4.2.0', log))
+	assert.doesNotThrow(() => assertSiteKit('5.5.0', log))
+	assert.deepEqual(log.warnings, [])
+})
+
+test('site-kit: неразборчивую версию пускаем с предупреждением и тем, что поставить', () => {
+	const log = logger()
+
+	assert.doesNotThrow(() => assertSiteKit('main', log))
+	assert.equal(log.warnings.length, 1)
+
+	assert.match(
+		log.warnings[0] ?? '',
+		/infra-site-kit 4\.2\.0 или новее, а версию main не разобрать\. .*npm i -D github:aimuzov\/infra-site-kit#v4\.2\.0/,
+	)
 })
 
 test('site-kit: сравнение версий по major, minor и patch', () => {
@@ -52,5 +78,5 @@ test('site-kit: сравнение версий по major, minor и patch', () 
 	assert.equal(atLeast('4.1.9', '4.2.0'), false)
 	assert.equal(atLeast('3.9.9', '4.2.0'), false)
 	assert.equal(atLeast('v4.2.0', '4.2.0'), true)
-	assert.equal(atLeast('main', '4.2.0'), true)
+	assert.equal(atLeast('main', '4.2.0'), undefined)
 })

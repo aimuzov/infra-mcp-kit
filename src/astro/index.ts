@@ -129,8 +129,8 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
-				assertSiteKit(siteKitVersion())
+			'astro:config:setup': ({ config, injectRoute, updateConfig, logger }) => {
+				assertSiteKit(siteKitVersion(), logger)
 
 				const { logo } = options.service
 				const resolved: McpPagesOptions = logo

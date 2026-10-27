@@ -26,12 +26,12 @@ export function siteKitVersion(from: string | URL = import.meta.url): string | u
 	return undefined
 }
 
-/** Не ниже ли `version`, чем `min`. Хвост пререлиза не смотрим, непонятную версию пускаем. */
-export function atLeast(version: string, min: string): boolean {
+/** Не ниже ли `version`, чем `min`, или `undefined`, если версию не разобрать. Хвост пререлиза не смотрим. */
+export function atLeast(version: string, min: string): boolean | undefined {
 	const parse = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number)
 	const [have, need] = [parse(version), parse(min)]
 
-	if (!have || !need) return true
+	if (!have || !need) return undefined
 
 	for (let i = 0; i < 3; i++) {
 		if (have[i] !== need[i]) return (have[i] ?? 0) > (need[i] ?? 0)
@@ -42,14 +42,22 @@ export function atLeast(version: string, min: string): boolean {
 
 /**
  * Старый site-kit роняет сборку непонятной ошибкой Vite про `exports`, поэтому проверяем его
- * до неё и говорим, что поставить.
+ * до неё и говорим, что поставить. Релизы site-kit версионирует release-please, так что
+ * неразборчивая версия -- это форк или локальная копия: свежая она или нет, не знаем, и сборку
+ * не останавливаем, а оставляем подсказку на случай той же ошибки Vite.
  */
-export function assertSiteKit(version: string | undefined): void {
+export function assertSiteKit(version: string | undefined, logger: { warn(message: string): void }): void {
 	const fix = `npm i -D github:aimuzov/infra-site-kit#v${SITE_KIT_MIN}`
 
 	if (version === undefined)
 		throw new Error(`Страницам infra-mcp-kit нужна ${SITE_KIT} ${SITE_KIT_MIN} или новее, а её нет: ${fix}`)
 
-	if (!atLeast(version, SITE_KIT_MIN))
+	const fresh = atLeast(version, SITE_KIT_MIN)
+
+	if (fresh === undefined)
+		logger.warn(
+			`Страницам infra-mcp-kit нужна ${SITE_KIT} ${SITE_KIT_MIN} или новее, а версию ${version} не разобрать. Если Vite упадёт на exports: ${fix}`,
+		)
+	else if (!fresh)
 		throw new Error(`Страницам infra-mcp-kit нужна ${SITE_KIT} ${SITE_KIT_MIN} или новее, стоит ${version}: ${fix}`)
 }

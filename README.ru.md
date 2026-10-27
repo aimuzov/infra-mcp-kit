@@ -100,7 +100,7 @@ await serveHttp({
 Вход — это статическая страница и хук `complete({ request, query, form })`, который говорит, кто вернулся:
 
 - `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
-- `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
+- `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом. `hide` убирает поля, которые сервер знает сам, см. [Форма входа по токену](#форма-входа-по-токену).
 
 Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
 
@@ -145,11 +145,51 @@ export default defineConfig({
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
+### Форма входа по токену
+
+Форма описывается один раз, в модуле, который берут и `astro.config.mjs`, и сервер, поэтому страница и `tokenFormLogin` не разъезжаются:
+
+```ts
+// src/login-form.ts
+import { defineTokenForm } from '@aimuzov/infra-mcp-kit/astro'
+
+export const loginForm = defineTokenForm({
+	title: { ru: 'Подключение example', en: 'Connecting example' },
+	fields: [
+		{ name: 'url', label: { ru: 'Адрес', en: 'Address' }, type: 'url', placeholder: 'https://example.com' },
+		{ name: 'token', label: { ru: 'API-токен', en: 'API token' }, type: 'password' },
+	],
+})
+```
+
+```js
+// astro.config.mjs
+import { loginForm } from './src/login-form.ts'
+
+mcpPages({ service, tokenForm: loginForm })
+```
+
+```ts
+// src/http.ts
+tokenFormLogin({
+	fields: loginForm.fields,
+	// Адрес пришёл из env: страница прячет поле, сервер его не спрашивает и не читает.
+	hide: process.env.EXAMPLE_URL ? ['url'] : [],
+	verify,
+})
+```
+
+- Страница собрана до того, как сервер узнал свой env, поэтому `hide` работает в рантайме: список едет во фрагменте адреса (`hide=url`), остров убирает эти поля после гидрации, а `verify` не получает их значений, даже если кто-то их прислал. Имя, которого нет в форме, не даёт серверу стартовать.
+- Тексты принимают строку или `{ ru, en }`. Перевод в `service.strings` по ключам из раздела [Языки](#языки) по-прежнему сильнее, так что конфиг со строками работает как раньше. Ошибку «Заполни поле» сервер пишет с теми же подписями.
+- `defineTokenForm`, `mcpPages` и `tokenFormLogin` не пускают повтор имени поля и имя `request`: в нём едет подписанный запрос входа.
+- `defineTokenForm` и типы `TokenForm` и `TokenFormField` есть и в `/astro`, и в `/http`. Общий модуль берёт их из `/astro`: этот вход не тянет ни Astro, ни сервер, так что лёгок и в конфиге, и в рантайме.
+- `loginStep` из `/testing` отдаёт скрытые поля в `step.hide`.
+
 ### Языки
 
 С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
 
-Английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
+Форма входа по токену может держать тексты как `{ ru, en }` прямо в конфиге, см. [Форма входа по токену](#форма-входа-по-токену). В остальном английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
 
 Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 

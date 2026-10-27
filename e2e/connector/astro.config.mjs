@@ -4,6 +4,8 @@ import mcpPages from '@aimuzov/infra-mcp-kit/astro'
 import svelte from '@astrojs/svelte'
 import { defineConfig } from 'astro/config'
 
+import { loginForm } from './src/login-form.ts'
+
 export default defineConfig({
 	srcDir: './src/frontend',
 	outDir: './build/public',
@@ -31,11 +33,8 @@ export default defineConfig({
 						'service.tagline': 'A check of the kit pages on Astro',
 						'service.lead': 'Static pages from the kit, islands in the browser draw the data of the user.',
 						'tool.пинг': 'ping',
-						'tokenForm.title': 'Connecting fixture',
 						'tokenForm.lead':
 							'Paste the API token of the service: it only travels inside the encrypted access token.',
-						'field.token.label': 'API token',
-						'field.token.hint': 'Settings → API',
 						'telegram.grant.0': 'read your data',
 						'telegram.grant.1': 'write on your behalf',
 						'fixture.accountTitle': 'fixture account',
@@ -48,18 +47,8 @@ export default defineConfig({
 				},
 			},
 			locales: ['ru', 'en'],
-			tokenForm: {
-				title: 'Подключение fixture',
-				lead: 'Вставь API-токен сервиса: он уедет только в зашифрованный токен доступа.',
-				fields: [
-					{
-						name: 'token',
-						label: 'API-токен',
-						type: 'password',
-						hint: 'Настройки → API',
-					},
-				],
-			},
+			// Те же поля берёт сервер: `tokenFormLogin({ fields: loginForm.fields })`.
+			tokenForm: loginForm,
 			telegram: {
 				botName: 'fixture_bot',
 				grants: ['читать твои данные', 'писать от твоего имени'],

@@ -100,7 +100,7 @@ OAuth rules:
 Sign-in is a static page plus a `complete({ request, query, form })` hook that tells who came back:
 
 - `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
-- `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
+- `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message. `hide` drops the fields the server knows on its own, see [Token form](#token-form).
 
 The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
 
@@ -142,11 +142,51 @@ export default defineConfig({
 
 [`e2e/connector`](e2e/connector) is a working example.
 
+### Token form
+
+The form is described once, in a module that both `astro.config.mjs` and the server import, so the page and `tokenFormLogin` never drift apart:
+
+```ts
+// src/login-form.ts
+import { defineTokenForm } from '@aimuzov/infra-mcp-kit/astro'
+
+export const loginForm = defineTokenForm({
+	title: { ru: 'Подключение example', en: 'Connecting example' },
+	fields: [
+		{ name: 'url', label: { ru: 'Адрес', en: 'Address' }, type: 'url', placeholder: 'https://example.com' },
+		{ name: 'token', label: { ru: 'API-токен', en: 'API token' }, type: 'password' },
+	],
+})
+```
+
+```js
+// astro.config.mjs
+import { loginForm } from './src/login-form.ts'
+
+mcpPages({ service, tokenForm: loginForm })
+```
+
+```ts
+// src/http.ts
+tokenFormLogin({
+	fields: loginForm.fields,
+	// The address came from env: the page hides the field, the server neither asks for it nor reads it.
+	hide: process.env.EXAMPLE_URL ? ['url'] : [],
+	verify,
+})
+```
+
+- The page is built before the server knows its env, so `hide` works at runtime: the list travels in the URL fragment (`hide=url`), the island drops those fields after hydration, and `verify` gets no value for them even if someone sends one. A name that is not in the form stops the server start.
+- Texts take a string or `{ ru, en }`. A translation in `service.strings` under the keys from [Languages](#languages) still wins, so a config with plain strings keeps working. The server writes its "fill in the field" error with the same labels.
+- `defineTokenForm`, `mcpPages` and `tokenFormLogin` reject a repeated field name and the name `request`, which carries the signed sign-in request.
+- `defineTokenForm` and the `TokenForm` and `TokenFormField` types come from both `/astro` and `/http`. The shared module takes them from `/astro`: that entry loads neither Astro nor the server, so it stays light in the config and at runtime.
+- `loginStep` of `/testing` gives the hidden fields as `step.hide`.
+
 ### Languages
 
 With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
 
-English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
+The token form can take its texts as `{ ru, en }` right in the config, see [Token form](#token-form). Otherwise English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
 
 A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 

@@ -27,6 +27,7 @@ import {
 	type RunningHttp,
 } from '#kit/testing/index'
 
+import { loginForm } from './connector/src/login-form.ts'
 import { buildPages } from './pages.ts'
 
 const SHOTS = fileURLToPath(new URL('../test-results/screens', import.meta.url))
@@ -34,12 +35,16 @@ const CLIENT_REDIRECT = 'http://127.0.0.1:9/cb'
 
 let http: RunningHttp
 let browser: Browser
+let publicDir: string
 const problems: string[] = []
 
-before(async () => {
-	const publicDir = buildPages()
-
-	http = await startHttp((base) =>
+/**
+ * Коннектор-фикстура на собранных страницах. Поля формы -- из того же модуля, что берёт
+ * `astro.config.mjs`. Основной экземпляр прячет адрес пространства, как сервер, которому
+ * его задали в env.
+ */
+function connector(hide: string[]) {
+	return startHttp((base) =>
 		createHttpApp({
 			config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
 			service: { name: 'fixture' },
@@ -48,7 +53,8 @@ before(async () => {
 				store: memoryStore(),
 				tokens: 'encrypt',
 				login: tokenFormLogin({
-					fields: [{ name: 'token', label: 'API-токен' }],
+					fields: loginForm.fields,
+					hide,
 					verify: ({ token }) => {
 						if (token !== 'good')
 							throw new LoginError({ ru: 'Токен не подошёл', en: 'The token did not fit' })
@@ -78,7 +84,11 @@ before(async () => {
 			},
 		}),
 	)
+}
 
+before(async () => {
+	publicDir = buildPages()
+	http = await connector(['space'])
 	browser = await chromium.launch()
 	mkdirSync(SHOTS, { recursive: true })
 })
@@ -89,8 +99,7 @@ after(async () => {
 })
 
 /** Клиент регистрируется и идёт в `/authorize`: адрес страницы входа с контекстом во фрагменте. */
-async function authorize(): Promise<{ url: string; step: LoginStep }> {
-	const base = http.base
+async function authorize(base = http.base): Promise<{ url: string; step: LoginStep }> {
 	const reg = await fetch(`${base}/register`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -186,6 +195,80 @@ describe('OAuth через статическую страницу входа', 
 
 		assert.match(request.url(), /code=/)
 		await context.close()
+	})
+})
+
+describe('форма входа из общего модуля', () => {
+	test('поле, которое сервер знает сам, есть в статике, но пропадает после гидрации и не нужно серверу', async () => {
+		const { url, step } = await authorize()
+
+		assert.deepEqual(step.hide, ['space'])
+		// Страница собрана со всеми полями: что спрашивать, сервер решает уже в рантайме.
+		assert.match(await (await fetch(new URL(step.page, http.base))).text(), /name="space"/)
+
+		const { page, context } = await open(url)
+
+		assert.equal(await page.locator('input[name=space]').count(), 0)
+		assert.equal(await page.locator('label[for=field-token]').innerText(), 'API-токен')
+		await page.fill('input[name=token]', 'good')
+
+		const [request] = await Promise.all([
+			page.waitForRequest((r) => r.url().startsWith(CLIENT_REDIRECT)),
+			page.click('button[type=submit]'),
+		])
+
+		assert.match(request.url(), /code=/)
+		await context.close()
+
+		// После ошибки поле тоже скрыто: `hide` едет во фрагменте и обратно на форму.
+		const refused = await submitForm({ token: 'bad' })(step)
+
+		assert.deepEqual(loginStep(refused.headers.get('location') ?? '', http.base).hide, ['space'])
+	})
+
+	test('без hide форма спрашивает все поля, подписи на языке страницы', async () => {
+		const full = await connector([])
+
+		try {
+			const { url, step } = await authorize(full.base)
+
+			assert.deepEqual(step.hide, [])
+
+			// Пустое обязательное поле браузер не отправит, а сервер всё равно проверяет сам.
+			const refused = await submitForm({ token: 'good' })(step)
+
+			assert.match(
+				loginStep(refused.headers.get('location') ?? '', full.base).error,
+				/Заполни поле «Адрес пространства»/,
+			)
+
+			const context = await browser.newContext({ locale: 'en-US' })
+			const page = await context.newPage()
+
+			await page.goto(url)
+			await page.waitForURL(/\/en\/login/)
+			await page.locator('input[name=space]').waitFor()
+			assert.equal(await page.locator('label[for=field-space]').innerText(), 'Space address')
+			assert.equal(await page.locator('label[for=field-token]').innerText(), 'API token')
+
+			assert.equal(
+				await page.locator('input[name=space]').getAttribute('placeholder'),
+				'https://space.example.com',
+			)
+
+			await page.fill('input[name=space]', 'https://space.example.com')
+			await page.fill('input[name=token]', 'good')
+
+			const [request] = await Promise.all([
+				page.waitForRequest((r) => r.url().startsWith(CLIENT_REDIRECT)),
+				page.click('button[type=submit]'),
+			])
+
+			assert.match(request.url(), /code=/)
+			await context.close()
+		} finally {
+			await full.close()
+		}
 	})
 })
 

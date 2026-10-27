@@ -120,7 +120,7 @@ await serveHttp({
 })
 ```
 
-`loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback.
+`loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback. `telegramAccount` проверяет и `devUserId`, переданный руками: при `PUBLIC_URL` не на loopback он не работает, а только оставляет предупреждение в логе.
 
 Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме: `telegramLogin({ botToken, botName })` кладёт его во фрагмент `/login/telegram`, `telegramAccount` отдаёт его `/account/signin`.
 

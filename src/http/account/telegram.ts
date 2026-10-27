@@ -13,6 +13,7 @@ import {
 import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
+import type { Logger } from '#kit/log'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
@@ -54,15 +55,16 @@ export const SIGNIN_COOKIE = 'mcp_signin'
  * в чужой кабинет, и он загрузил бы туда свои данные.
  */
 export function telegramAccount(options: TelegramAccountOptions): Route {
-	const { botToken, botName, devUserId, home = '/account', page = '/account/signin' } = options
+	const { botToken, botName, home = '/account', page = '/account/signin' } = options
 
-	if (!devUserId && !(botToken && botName)) {
+	if (!options.devUserId && !(botToken && botName)) {
 		throw new Error('telegramAccount: нужны botToken и botName, без них -- только devUserId на localhost')
 	}
 
 	const claimsOf = (user: TelegramUser) =>
 		ownClaims(options.claims?.(user) ?? { name: user.firstName || user.username })
 	let session = options.sessions
+	let devUserId: string | undefined
 
 	return async (request, context) => {
 		const url = new URL(request.url)
@@ -73,6 +75,7 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 			`${SIGNIN_COOKIE}=${value}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure}`
 
 		session ??= cookieSessions(context.tokens, publicUrl)
+		devUserId ??= loopbackOnly(options.devUserId, publicUrl, context.logger)
 
 		if (route === 'GET /account/auth') {
 			const state = randomBytes(24).toString('base64url')
@@ -123,6 +126,20 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 		return undefined
 	}
+}
+
+/**
+ * Dev-вход пускает без подписи, поэтому только на localhost. `loadTelegramConfig` это уже
+ * проверяет, но `devUserId` можно передать и руками: на проде он только оставит строку в логе.
+ */
+function loopbackOnly(devUserId: string | undefined, publicUrl: URL, logger: Logger): string {
+	if (!devUserId || isLoopback(publicUrl)) return devUserId ?? ''
+
+	logger.warn('telegramAccount: devUserId is ignored, PUBLIC_URL is not on localhost', {
+		publicUrl: publicUrl.origin,
+	})
+
+	return ''
 }
 
 function redirect(location: string, cookie?: string): Response {

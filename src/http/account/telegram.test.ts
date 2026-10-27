@@ -10,6 +10,7 @@ import { loadTelegramConfig, telegramLogin, verifyTelegramLogin } from '#kit/htt
 import { memoryStore } from '#kit/http/oauth/store'
 import { Tokens } from '#kit/http/oauth/tokens'
 import { sessions, type Sessions } from '#kit/http/session'
+import { log } from '#kit/log'
 import { McpServer } from '#kit/mcp'
 import {
 	accountLogin,
@@ -240,6 +241,32 @@ describe('вход в кабинет через Telegram', () => {
 		const prod = await start()
 
 		assert.equal(errorOf((await accountLogin(prod, 'dev')).response).code, 'login')
+	})
+
+	test('на проде devUserId не работает, а только пишет в лог', async () => {
+		const warnings: string[] = []
+		const logger = { ...log, warn: (message: string) => warnings.push(message) }
+		const app = createHttpApp({
+			config: loadHttpConfig({ AUTH_SECRET: SECRET, PUBLIC_URL: 'https://mcp.example.com' }),
+			service: { name: 'test' },
+			createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
+			logger,
+			routes: [telegramAccount({ botToken: BOT, botName: 'test_bot', devUserId: '7' }), state()],
+		})
+		const auth = await app.handle(new Request('https://mcp.example.com/account/auth'))
+		const body = (await auth.json()) as { dev: string | null; state: string }
+
+		assert.equal(body.dev, null)
+
+		const cookie = (auth.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+		const login = await app.handle(
+			new Request(`https://mcp.example.com/account/login?dev=1&state=${body.state}`, { headers: { cookie } }),
+		)
+
+		assert.equal(errorOf(login).code, 'login')
+		assert.equal(login.headers.getSetCookie().length, 0)
+		assert.equal(warnings.length, 1)
+		assert.match(warnings[0] ?? '', /devUserId is ignored/)
 	})
 
 	test('свои claims сессии, но sub -- всегда Telegram id', async () => {

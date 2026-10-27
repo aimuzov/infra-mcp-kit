@@ -120,7 +120,7 @@ await serveHttp({
 })
 ```
 
-`loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback.
+`loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback. `telegramAccount` checks a `devUserId` passed by hand too: with `PUBLIC_URL` outside loopback it does not work and only leaves a warning in the log.
 
 The pages are built without this env, so the server hands them the bot name at runtime: `telegramLogin({ botToken, botName })` puts it into the fragment of `/login/telegram`, `telegramAccount` gives it to `/account/signin`.
 

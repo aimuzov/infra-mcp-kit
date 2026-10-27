@@ -54,8 +54,6 @@ export type TokenField = {
 	required?: boolean
 }
 
-export { landingHref, type LandingPlace, type PagesCard, type PagesLanding, type PagesLink } from '#kit/astro/landing'
-
 export type McpPagesOptions = {
 	service: PagesService
 	/** Вход по токен-форме, страница `/login`. Сервер берёт `tokenFormLogin`. */
@@ -75,6 +73,8 @@ export type McpPagesOptions = {
 	 */
 	landing?: PagesLanding
 }
+
+export { landingHref, type LandingPlace, type PagesCard, type PagesLanding, type PagesLink } from '#kit/astro/landing'
 
 export const VIRTUAL_MODULE = 'virtual:infra-mcp-kit/pages'
 

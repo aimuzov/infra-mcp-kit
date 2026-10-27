@@ -1,4 +1,4 @@
-import { localizePath, pick, type Localized } from '#kit/i18n'
+import { LOCALES, localizePath, pick, type Localized } from '#kit/i18n'
 
 /** Свои карточки лендинга поверх его разметки: героя, "Подключить" и инструментов. */
 export type PagesLanding = {
@@ -49,7 +49,7 @@ export function checkLanding(landing: PagesLanding | undefined): void {
 
 		ids.add(card.id)
 
-		if (!pick(card.title, 'ru')) throw new Error(`У карточки лендинга "${card.id}" нет заголовка`)
+		if (!filled(card.title)) throw new Error(`У карточки лендинга "${card.id}" нет заголовка`)
 
 		if (card.after !== undefined && !PLACES.includes(card.after)) {
 			throw new Error(`Карточка лендинга "${card.id}": after -- одно из ${PLACES.join(', ')}`)
@@ -70,7 +70,12 @@ function checkLink(id: string, link: PagesLink): void {
 		throw new Error(`Ссылка "${link.href}" карточки "${id}": только путь, #якорь, http(s) или mailto`)
 	}
 
-	if (!pick(link.label, 'ru')) throw new Error(`У ссылки "${link.href}" карточки "${id}" нет подписи`)
+	if (!filled(link.label)) throw new Error(`У ссылки "${link.href}" карточки "${id}" нет подписи`)
+}
+
+// Пустой текст на одном языке дал бы пустой заголовок на его странице.
+function filled(value: Localized | undefined): boolean {
+	return LOCALES.every((locale) => Boolean(pick(value, locale)))
 }
 
 /**

@@ -35,8 +35,10 @@ test('лендинг: плохая карточка роняет сборку', 
 		[[card(), card()], /описана дважды/],
 		[[card({ title: '' })], /нет заголовка/],
 		[[card({ title: {} })], /нет заголовка/],
+		[[card({ title: { ru: 'Кабинет', en: '' } })], /нет заголовка/],
 		[[card({ after: 'footer' as never })], /after -- одно из hero, connect, tools/],
 		[[card({ links: [{ href: '/account', label: '' }] })], /нет подписи/],
+		[[card({ links: [{ href: '/account', label: { ru: 'Открыть', en: '' } }] })], /нет подписи/],
 	] as const) {
 		assert.throws(() => checkLanding({ cards: [...cards] }), error)
 	}

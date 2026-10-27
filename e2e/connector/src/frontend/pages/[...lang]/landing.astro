@@ -1,0 +1,30 @@
+---
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
+
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Landing from '@aimuzov/infra-mcp-kit/astro/landing.astro'
+import { localePaths, pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+// Свой лендинг поверх разметки кита. С `override: ['index']` так выглядела бы
+// `pages/[...lang]/index.astro` сервиса, а фикстура держит его рядом, на `/landing`.
+export const getStaticPaths = localePaths
+
+const locale = localeOfPath(Astro.url.pathname)
+---
+
+<Landing>
+	<LandingCard
+		slot="after-hero"
+		id="status"
+		title={pt(locale, 'fixture.status')}
+		text={pt(locale, 'fixture.statusText')}
+	/>
+	<LandingCard slot="after-connect" id="faq" title={pt(locale, 'fixture.faq')}>
+		<ul class="grants">
+			<li>{pt(locale, 'fixture.faqText')}</li>
+		</ul>
+	</LandingCard>
+	<p class="hint" data-slot="end">
+		{pt(locale, 'fixture.end')}
+	</p>
+</Landing>

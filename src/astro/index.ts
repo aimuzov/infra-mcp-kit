@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { AstroIntegration } from 'astro'
 
+import { checkLanding, type PagesLanding } from '#kit/astro/landing'
 import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
 import { checkTokenFields, type TokenForm } from '#kit/token-form'
 
@@ -74,7 +75,14 @@ export type McpPagesOptions = {
 	 * под `/en/`, ставит переключатель и `hreflang`, а сервер подбирает язык по `Accept-Language`.
 	 */
 	locales?: Locale[]
+	/**
+	 * Свои карточки лендинга: заголовок, абзац и ссылки после героя, "Подключить" или
+	 * инструментов. Что в карточку не влезает, идёт в слоты `astro/landing.astro` на своей `index`.
+	 */
+	landing?: PagesLanding
 }
+
+export { landingHref, type LandingPlace, type PagesCard, type PagesLanding, type PagesLink } from '#kit/astro/landing'
 
 export const VIRTUAL_MODULE = 'virtual:infra-mcp-kit/pages'
 
@@ -128,6 +136,9 @@ export function serviceCss(service: PagesService): string {
  */
 export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	const skip = new Set(options.override ?? [])
+	const locales = options.locales ?? [DEFAULT_LOCALE]
+
+	checkLanding(options.landing, options.service.strings, locales)
 
 	// Плохой цвет роняет сборку сразу, а не при первой загрузке стилей.
 	serviceCss(options.service)
@@ -158,8 +169,6 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 					['/error', 'error.astro', !skip.has('error')],
 					['/404', '404.astro', !skip.has('404')],
 				]
-
-				const locales = options.locales ?? [DEFAULT_LOCALE]
 
 				for (const locale of locales) {
 					const prefix = locale === DEFAULT_LOCALE ? '' : `/${locale}`

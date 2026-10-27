@@ -546,6 +546,105 @@ describe('языки', () => {
 	})
 })
 
+describe('лендинг', () => {
+	/** Что стоит в `main` лендинга по порядку: карточки по `data-card`, остальное по заголовку. */
+	async function order(page: Page): Promise<string[]> {
+		return page
+			.locator('main > *')
+			.evaluateAll((els) =>
+				els.map(
+					(el) =>
+						el.getAttribute('data-card') ??
+						el.getAttribute('data-slot') ??
+						(el.matches('.hero') ? 'hero' : (el.querySelector('h2')?.textContent ?? el.tagName)),
+				),
+			)
+	}
+
+	test('карточки из конфига встают после героя и в конце, ссылки -- кнопки', async () => {
+		const { page, context } = await open('/')
+
+		assert.deepEqual(await order(page), ['hero', 'account', 'Подключить', 'Инструменты', 'help'])
+
+		const account = page.locator('[data-card="account"]')
+
+		assert.match((await account.textContent()) ?? '', /Сначала кабинет[\s\S]*Войди и загрузи корпус/)
+
+		const enter = account.getByRole('link', { name: 'Открыть кабинет' })
+
+		assert.equal(await enter.getAttribute('href'), '/account')
+		assert.equal(await enter.getAttribute('target'), null)
+
+		// Главная ссылка -- залитая кнопка с расслоением, остальные обведены.
+		const look = await enter.evaluate((node) => {
+			const css = getComputedStyle(node)
+
+			return {
+				underline: css.textDecorationLine,
+				shadow: css.boxShadow,
+				height: node.getBoundingClientRect().height,
+			}
+		})
+
+		assert.equal(look.underline, 'none')
+		assert.match(look.shadow, /rgb\(241, 31, 36\).*rgb\(95, 232, 176\)/)
+		assert.equal(look.height, 40)
+
+		const readme = page.locator('[data-card="help"]').getByRole('link', { name: 'README' })
+
+		assert.deepEqual(
+			[await readme.getAttribute('target'), await readme.getAttribute('rel')],
+			['_blank', 'noopener'],
+		)
+
+		assert.equal(await readme.locator('svg').count(), 1)
+
+		assert.equal(
+			await page.locator('[data-card="help"]').getByRole('link', { name: 'Написать' }).getAttribute('href'),
+			'mailto:help@example.com',
+		)
+
+		await enter.click()
+		await page.waitForURL(/\/account$/)
+		await context.close()
+	})
+
+	test('английский лендинг: тексты по ключам и по языкам, путь ссылки с языком', async () => {
+		const { page, context } = await open('/en/')
+		const account = page.locator('[data-card="account"]')
+
+		assert.match((await account.textContent()) ?? '', /Account first[\s\S]*Sign in and upload the corpus/)
+		assert.equal(await account.getByRole('link', { name: 'Open the account' }).getAttribute('href'), '/en/account')
+		assert.match((await page.locator('[data-card="help"]').textContent()) ?? '', /Help[\s\S]*Write to us/)
+		await context.close()
+	})
+
+	test('свой лендинг на разметке кита: слоты после героя, после "Подключить" и в конце', async () => {
+		const { page, context } = await open('/landing')
+
+		assert.deepEqual(await order(page), [
+			'hero',
+			'account',
+			'status',
+			'Подключить',
+			'faq',
+			'Инструменты',
+			'help',
+			'end',
+		])
+
+		// Своя разметка в слоте карточки встаёт между заголовком и ссылками.
+		assert.equal(await page.locator('[data-card="faq"] .grants li').count(), 1)
+		await context.close()
+
+		const en = await open('/en/landing')
+
+		assert.match((await en.page.locator('[data-card="status"]').textContent()) ?? '', /Corpus status/)
+		assert.match((await en.page.locator('[data-slot="end"]').textContent()) ?? '', /The last slot/)
+		await en.context.close()
+	})
+})
+
 describe('скриншоты', () => {
 	test('все экраны в обеих темах на телефоне и десктопе, без нарушений CSP и ошибок JS', async () => {
 		const { url: login } = await authorize()
@@ -580,6 +679,8 @@ describe('скриншоты', () => {
 			'en.not-found': ['/en/nope'],
 			'en.account-guest': ['/en/account'],
 			'en.account': ['/en/account', { cookie: true }],
+			'landing-slots': ['/landing'],
+			'en.landing-slots': ['/en/landing'],
 		}
 
 		for (const [name, [path, { prepare, ...options } = {}]] of Object.entries(screens)) {

@@ -215,6 +215,59 @@ npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
 - 5.1 turns the language switch into a menu: `details.lang` with a link per language instead of the `a.lang` link to the other one. A test of the server that clicked `a.lang` opens the menu first: `page.locator('details.lang summary').click()`, then `page.getByRole('link', { name: /English/ })`.
 - A server that stays on 4.2 keeps working: the kit uses nothing that 4.2 lacks, its header just shows the old link.
 
+### Landing
+
+A card of the service goes onto the landing with `landing.cards`, no own `index` needed:
+
+```js
+mcpPages({
+	service,
+	landing: {
+		cards: [
+			{
+				id: 'account',
+				after: 'hero',
+				title: 'Сначала кабинет',
+				text: 'Войди и загрузи корпус, потом подключай.',
+				links: [{ href: '/account', label: 'Открыть кабинет', primary: true }],
+			},
+			{
+				id: 'help',
+				title: { ru: 'Помощь', en: 'Help' },
+				links: [{ href: 'https://example.com/docs', label: { ru: 'Документация', en: 'Docs' } }],
+			},
+		],
+	},
+})
+```
+
+- `after` puts a card after the hero, after "Connect" or, by default, at the end after the tools.
+- A text is a string or `{ ru, en }`. A translation in `service.strings` by the key `card.<id>.title`, `card.<id>.text` or `card.<id>.link.<i>` wins over it.
+- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else fails the build, and so do a repeated `id` and an empty title or link label in any of the built languages: those of `locales`, or `ru` alone without them.
+- `primary` makes the link the main button, the others are outlined.
+
+When a card is not enough, say a status island, the service overrides `index` and builds it on the kit's landing with slots: `after-hero`, `after-connect` and the default one at the end. The cards of the config stay in place, and `LandingCard` draws a card of the same look with its own markup inside:
+
+```astro
+---
+// src/frontend/pages/[...lang]/index.astro, with override: ['index']
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Landing from '@aimuzov/infra-mcp-kit/astro/landing.astro'
+import { localePaths } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+import CorpusStatus from '#frontend/components/corpus-status.svelte'
+
+export const getStaticPaths = localePaths
+---
+
+<Landing>
+	<CorpusStatus slot="after-hero" client:load />
+	<LandingCard slot="after-connect" id="faq" title="Вопросы">
+		<p class="muted">Своя разметка между заголовком и ссылками.</p>
+	</LandingCard>
+</Landing>
+```
+
 ## Testing
 
 ```ts

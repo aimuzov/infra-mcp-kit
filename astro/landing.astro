@@ -1,0 +1,81 @@
+---
+// Лендинг коннектора: герой, "Подключить" и инструменты, между ними карточки `landing.cards`
+// из конфига. Сервис со своей `index` берёт этот же лендинг и кладёт своё в слоты:
+// `after-hero`, `after-connect` и в конец, после инструментов.
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
+import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
+import { icons } from '@lucide/svelte'
+import config from 'virtual:infra-mcp-kit/pages'
+
+import type { LandingPlace } from '@aimuzov/infra-mcp-kit/astro'
+import Connect from '@aimuzov/infra-mcp-kit/astro/components/connect.svelte'
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Layout from '@aimuzov/infra-mcp-kit/astro/layout.astro'
+import { own, pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+const { service, landing } = config
+const locale = localeOfPath(Astro.url.pathname)
+
+// Иконки рисуются на сборке, в браузер уходит только SVG. Опечатка в имени роняет сборку.
+const pascal = (name: string) => name.replace(/(^|-)([a-z0-9])/g, (_, __, c: string) => c.toUpperCase())
+const tools = (service.tools ?? []).map((tool) => {
+	if (typeof tool === 'string') return { label: own(locale, `tool.${tool}`, tool), Icon: undefined }
+
+	const label = own(locale, `tool.${tool.label}`, tool.label)
+
+	const Icon = tool.icon ? (icons as Record<string, typeof icons.Kanban>)[pascal(tool.icon)] : undefined
+
+	if (tool.icon && !Icon) throw new Error(`Нет иконки Lucide «${tool.icon}» у инструмента «${label}»`)
+
+	return { label, Icon }
+})
+
+// Тексты карточек на языке страницы: перевод по ключу `card.<id>.*` сильнее текста конфига.
+const cards = (landing?.cards ?? []).map(({ id, title, text, links = [], after = 'tools' }) => ({
+	id,
+	after,
+	title: own(locale, `card.${id}.title`, title),
+	text: own(locale, `card.${id}.text`, text),
+	links: links.map((link, i) => ({ ...link, label: own(locale, `card.${id}.link.${i}`, link.label) })),
+}))
+const at = (place: LandingPlace) => cards.filter((card) => card.after === place)
+---
+
+<Layout title={service.name} screen="landing">
+	<section class="hero">
+		<div class="hero__title">
+			{service.logoSvg && <span class="hero__logo" set:html={service.logoSvg} />}
+			<h1 class="glitch" data-text={service.name}>
+				{service.name}
+			</h1>
+		</div>
+		{service.tagline && <p class="tagline">{own(locale, 'service.tagline', service.tagline)}</p>}
+		{service.lead && <p class="lead">{own(locale, 'service.lead', service.lead)}</p>}
+	</section>
+	{at('hero').map(({ id, title, text, links }) => (
+		<LandingCard {id} {title} {text} {links} />
+	))}
+	<slot name="after-hero" />
+	<Connect client:load name={service.name} {locale} />
+	{at('connect').map(({ id, title, text, links }) => (
+		<LandingCard {id} {title} {text} {links} />
+	))}
+	<slot name="after-connect" />
+	{service.tools && service.tools.length > 0 && (
+		<Card>
+			<h2 class="section-title">{pt(locale, 'tools.title')}</h2>
+			<ul class="chips">
+				{tools.map(({ label, Icon }) => (
+					<li>
+						{Icon && <Icon class="chips__icon" size={15} />}
+						<code>{label}</code>
+					</li>
+				))}
+			</ul>
+		</Card>
+	)}
+	{at('tools').map(({ id, title, text, links }) => (
+		<LandingCard {id} {title} {text} {links} />
+	))}
+	<slot />
+</Layout>

@@ -233,7 +233,7 @@ describe('sentry', () => {
 			carriers['0.0.0-server'] = carriers[core.SDK_VERSION]
 			delete carriers[core.SDK_VERSION]
 
-			// Закрытый клиент другой копии SDK лежит первым: кит его пропускает.
+			// Закрытый клиент и клиент без DSN других копий SDK лежат первыми: кит их пропускает.
 			const closed = new ServerRuntimeClient({
 				dsn: 'https://public@o0.ingest.sentry.io/2',
 				integrations: [],
@@ -244,7 +244,14 @@ describe('sentry', () => {
 
 			scope.setClient(closed)
 			await closed.close()
-			globalThis.__SENTRY__ = { '0.0.0-closed': { defaultCurrentScope: scope }, ...carriers }
+			const noDsn = new core.Scope()
+
+			noDsn.setClient(new ServerRuntimeClient({ integrations: [], stackParser: core.createStackParser(), transport: () => ({}) }))
+			globalThis.__SENTRY__ = {
+				'0.0.0-closed': { defaultCurrentScope: scope },
+				'0.0.0-no-dsn': { defaultCurrentScope: noDsn },
+				...carriers,
+			}
 
 			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
 			const enabled = await kit.initSentry({ name: 'kit-test', version: '1.2.3', env: {} })
@@ -277,6 +284,27 @@ describe('sentry', () => {
 		assert.equal(events[0]?.release, 'own@1.0.0')
 		assert.equal(events[0]?.tags?.['mcp.tool'], 'pay')
 		assert.equal(events[0]?.exception?.values[0]?.value, 'via server')
+	})
+
+	test('сломанная отправка не мешает упавшему процессу выйти с кодом 1', async () => {
+		const script = [
+			`const { initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
+			"const transport = () => ({ send: async () => ({}), flush: async () => { throw new Error('flush broke') } })",
+			"await initSentry({ name: 'crash-test', version: '0.0.1', transport })",
+			"setTimeout(() => { throw new Error('crashed') })",
+		].join('\n')
+		const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+			env: { ...process.env, SENTRY_DSN: 'https://public@o0.ingest.sentry.io/1' },
+			stdio: ['ignore', 'ignore', 'pipe'],
+		})
+		let stderr = ''
+
+		child.stderr.on('data', (chunk) => (stderr += chunk))
+
+		const [code] = await once(child, 'exit')
+
+		assert.equal(code, 1)
+		assert.match(stderr, /Error: crashed/)
 	})
 
 	// Отдельный процесс: здесь SDK уже включён с подменённым транспортом, а проверить нужно

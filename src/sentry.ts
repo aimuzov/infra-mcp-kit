@@ -21,7 +21,11 @@ type ForeignScope = {
 	captureException(error: unknown): unknown
 	getClient(): ForeignClient | undefined
 }
-type ForeignClient = { flush(timeout: number): PromiseLike<unknown>; getOptions?(): { enabled?: boolean } }
+type ForeignClient = {
+	flush(timeout: number): PromiseLike<unknown>
+	getDsn?(): unknown
+	getOptions?(): { enabled?: boolean; dsn?: unknown }
+}
 type Carrier = { acs?: { getCurrentScope?(): ForeignScope }; defaultCurrentScope?: ForeignScope }
 
 export type SentryOptions = {
@@ -116,7 +120,8 @@ function foreignReporter(): Reporter | undefined {
 		const current = () => carrier.acs?.getCurrentScope?.() ?? carrier.defaultCurrentScope
 		const client = current()?.getClient()
 
-		if (!client || isClosed(client)) continue
+		// Без DSN SDK не заводит транспорт, и такой клиент молча теряет всё.
+		if (!client || isClosed(client) || !(client.getDsn?.() ?? client.getOptions?.().dsn)) continue
 
 		return {
 			capture(error, tags) {
@@ -142,7 +147,13 @@ const isClosed = (client: ForeignClient) =>
 /** Сеть через `fetch` из Node: своего HTTP-клиента `@sentry/core` не везёт. */
 const fetchTransport = (sentry: Core) => (options: BaseTransportOptions) =>
 	sentry.createTransport(options, async ({ body }) => {
-		const response = await fetch(options.url, { method: 'POST', body: body as BodyInit, headers: options.headers })
+		const response = await fetch(options.url, {
+			method: 'POST',
+			body: body as BodyInit,
+			headers: options.headers,
+			// Sentry не перенаправляет, а редирект увёл бы событие на чужой адрес или с https на http.
+			redirect: 'error',
+		})
 
 		return {
 			statusCode: response.status,
@@ -163,7 +174,8 @@ async function fatal(error: unknown) {
 	// Копия: отправленную раньше ошибку Sentry помечает и второй раз не шлёт, а падение процесса --
 	// отдельное событие.
 	send(error instanceof Error ? copyOf(error) : error, { fatal: 'true' })
-	await flushSentry()
+	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
+	await flushSentry().catch(() => {})
 	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
 	process.exit(1)
 }

@@ -99,7 +99,16 @@ test('scrub: обычный текст не портится', () => {
 test('scrub: медленных случаев на длинном мусоре нет', () => {
 	const started = Date.now()
 
-	for (const junk of ['a-'.repeat(20_000), '1'.repeat(40_000), '?a'.repeat(20_000), 'x='.repeat(20_000)]) scrub(junk)
+	const junks = [
+		'a-'.repeat(20_000),
+		'1'.repeat(40_000),
+		'?a'.repeat(20_000),
+		'x='.repeat(20_000),
+		'token-'.repeat(7_000),
+		'token="x '.repeat(5_000),
+	]
+
+	for (const junk of junks) scrub(junk)
 
 	assert.ok(Date.now() - started < 1000, `${Date.now() - started} мс`)
 })

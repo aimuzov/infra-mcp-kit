@@ -43,8 +43,9 @@ const QUOTED = new RegExp(
 const PAIR = new RegExp(String.raw`\b(${SECRET_KEY})(["']?\s*[:=]\s*)(["']?)${NOT_FILTERED}([^\s"'&,;)}\]]+)`, 'gi')
 
 const BUILTIN: Replace[] = [
-	// `https://user:pass@host`
-	(text) => text.replace(/\b([a-z][a-z\d+.-]*:\/\/)[^\s/?#@"'<>]+@/gi, `$1${FILTERED}@`),
+	// `https://user:pass@host`. Схема короткая: без предела строка через дефисы
+	// разбиралась бы за квадрат.
+	(text) => text.replace(/\b([a-z][a-z\d+.-]{0,30}:\/\/)[^\s/?#@"'<>]+@/gi, `$1${FILTERED}@`),
 	// Значения query и фрагмента: `?token=`, `&code=`, `#access_token=`. Имена остаются, по ним видно запрос.
 	(text) => text.replace(/([?&#])([^\s=?&#"'<>]+)=[^\s&#"'<>]+/g, `$1$2=${FILTERED}`),
 	// Первая пара тела формы, `code=...&state=...`: у неё нет `?` впереди.

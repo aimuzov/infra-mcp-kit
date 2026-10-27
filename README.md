@@ -219,7 +219,7 @@ Optional inputs of the action:
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
 - `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
 
-The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch.
 
 ## Migrating from 2.x
 

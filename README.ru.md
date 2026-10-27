@@ -222,7 +222,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 - `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
 - `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
 
-Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
+Страницам нужен infra-site-kit 4.2.0 или новее, с `i18n.js` и переключателем языка.
 
 ## Переезд с 2.x
 

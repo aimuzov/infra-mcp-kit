@@ -92,7 +92,27 @@ runs:
         key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
     - if: inputs.ui == 'true'
       shell: bash
-      run: npx playwright install --with-deps chromium && npm run test:ui
+      run: npx playwright install chromium
+    # `--with-deps` тянул из apt шрифты, которых нет в образе раннера, и медленное зеркало
+    # растягивало это до таймаута джобы. Библиотеки Chromium в образе уже есть, поэтому apt
+    # нужен, только если браузер без них не стартует. Тогда ставим с лимитом и повтором:
+    # apt докачивает начатое, следующая попытка продолжает с того же места. Три попытки по
+    # две минуты вместе с остальными проверками (2-3 минуты) укладываются в 10 минут джобы
+    # кита и шаблона. Если apt справился, а браузер всё равно не стартует, повтор apt этого
+    # не исправит: шаг падает сразу с ошибкой Chromium.
+    - if: inputs.ui == 'true'
+      shell: bash
+      run: |
+        launch() { node -e "import('playwright-core').then(({ chromium }) => chromium.launch()).then((b) => b.close())"; }
+        if launch; then exit 0; fi
+        for attempt in 1 2 3; do
+          if timeout 120 npx playwright install-deps chromium; then launch; exit; fi
+          echo "::warning::Playwright system dependencies, attempt $attempt failed"
+        done
+        exit 1
+    - if: inputs.ui == 'true'
+      shell: bash
+      run: npm run test:ui
     - if: inputs.smoke != ''
       shell: bash
       env:

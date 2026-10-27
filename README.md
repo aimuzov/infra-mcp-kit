@@ -22,7 +22,7 @@ Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://
 
 ## What's inside
 
-- [**Core**](#core): `runCli`, `serveStdio`, tool results, env helpers, `dataDir`, a stderr logger and `readVersion`.
+- [**Core**](#core): `runCli`, `serveStdio`, tool results, env helpers, `dataDir`, a stderr logger, `readVersion` and [error reports to Sentry](#sentry).
 - [**HTTP and OAuth**](#http-and-oauth): a stateless `/mcp` over Streamable HTTP, an OAuth server with single-use codes and rotating refresh tokens, Telegram and token-form sign-in, a JSON API for the account page.
 - [**Pages**](#pages): the `mcpPages()` Astro integration with the landing, sign-in, error and 404 pages in the "Signal" style.
 - [**Testing**](#testing): in-memory and HTTP clients and the whole OAuth flow for `node --test`.
@@ -60,6 +60,17 @@ await runCli({
 - `dataDir(name)` is `<NAME>_DATA_DIR`, then `$XDG_CONFIG_HOME/<name>`, then `~/.config/<name>`.
 - `log` writes to stderr only, stdout belongs to the protocol. `LOG_LEVEL` is `error`, `warn`, `info` (default) or `debug`, `LOG_FILE` adds a file.
 - `readVersion(import.meta.url)` finds the nearest `package.json`, so the MCP handshake never lags behind the release.
+
+### Sentry
+
+Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. The server writes no code for it, and without the variable the SDK is not even loaded. The variable has to be in the environment when `runCli` starts: if it lives in `.env`, call `loadEnvFile()` first.
+
+- The release is `<name>@<version>` from `runCli`, so `name` should match the Sentry project. The environment is `production`, `SENTRY_ENVIRONMENT` changes it for a local check.
+- Sent: uncaught exceptions and rejections (the process still exits with 1, once the event is out), errors of tool, prompt and resource handlers, including the ones the client gets back as `isError`, tagged `mcp.tool`, `mcp.prompt` or `mcp.resource`, failed HTTP, `/mcp` and OAuth requests and sign-ins tagged `http.path`, and an error that stops `runCli`.
+- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, so user data has no place in error messages.
+- Errors only, no traces. The client is `@sentry/core` instead of `@sentry/node`: 13 MB instead of 80, no OpenTelemetry and no breadcrumbs from the console or outgoing requests.
+- A server that called `Sentry.init` itself before `runCli`, from any SDK version, gets no second client: the kit sends its errors through the server's client with the same tags and does not read `SENTRY_DSN`.
+- A server without `runCli` calls `await initSentry({ name, version })` itself. `captureError(error, tags)` sends an error the server caught on its own, `withTags(tags, run)` tags every error inside `run`.
 
 ## HTTP and OAuth
 
@@ -217,9 +228,9 @@ Optional inputs of the action:
 
 - `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
-- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
+- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version. The runner image already has the libraries Chromium needs, so apt runs only when the browser doesn't start without them, with a time limit and three attempts. `--with-deps` used to pull fonts from a slow mirror past the job timeout. A server that installs Playwright in its own steps after the action still runs `npx playwright install --with-deps chromium` and hits the same apt: replace those steps with `ui: true` and keep only `upload-artifact` for the screenshots.
 
-The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch.
+The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch. `mcpPages()` checks the installed one and stops `astro check`, `astro build` and `astro dev` with the version to install, before Vite fails on `exports`. A version it can't parse, as in a fork or a local copy, gets only a warning. It is not a peer dependency: stdio servers without pages keep site-kit for the Prettier and oxlint configs, and an older one there must not break their `npm install`.
 
 ## Migrating from 2.x
 

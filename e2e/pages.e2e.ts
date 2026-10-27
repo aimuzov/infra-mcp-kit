@@ -117,6 +117,8 @@ async function authorize(): Promise<{ url: string; step: LoginStep }> {
 }
 
 type OpenOptions = { scheme?: 'light' | 'dark'; width?: number; cookie?: boolean }
+/** Экран для снимка: что сделать на странице перед ним, например открыть меню. */
+type ScreenOptions = OpenOptions & { prepare?: (page: Page) => Promise<void> }
 
 async function open(path: string, { scheme = 'light', width = 1280, cookie }: OpenOptions = {}) {
 	const context: BrowserContext = await browser.newContext({
@@ -334,10 +336,53 @@ describe('языки', () => {
 		await context.close()
 	})
 
+	test('меню языков из site-kit 5: оформлено "Сигналом", закрывается по Esc и клику мимо', async () => {
+		const { page, context } = await open('/')
+		const menu = page.locator('header details.lang')
+		const summary = menu.locator('summary')
+
+		// С site-kit 5.1 переключатель -- меню на `<details>`, а не ссылка на другой язык.
+		assert.equal(await page.locator('header a.lang').count(), 0)
+		assert.equal(await summary.getAttribute('aria-label'), 'Язык: Русский')
+		assert.equal((await summary.innerText()).trim(), 'RU')
+
+		// Кнопки шапки одной высоты, подпись меню -- моноширинным шрифтом "Сигнала".
+		const look = await summary.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			theme: document.querySelector('.theme')?.getBoundingClientRect().height,
+			font: getComputedStyle(node).fontFamily,
+		}))
+
+		assert.equal(look.height, look.theme)
+		assert.match(look.font, /mono/i)
+
+		await summary.click()
+		assert.equal(await menu.getAttribute('open'), '')
+
+		assert.deepEqual(
+			await menu
+				.locator('.lang__option')
+				.evaluateAll((els) => els.map((el) => [el.getAttribute('hreflang'), el.getAttribute('aria-current')])),
+			[
+				['ru', 'true'],
+				['en', null],
+			],
+		)
+
+		await page.keyboard.press('Escape')
+		assert.equal(await menu.getAttribute('open'), null)
+
+		await summary.click()
+		await page.locator('main').click({ position: { x: 5, y: 5 } })
+		assert.equal(await menu.getAttribute('open'), null)
+		await context.close()
+	})
+
 	test('переключатель ведёт на ту же страницу и запоминает выбор', async () => {
 		const { page, context } = await open('/account')
 
-		await page.locator('a.lang').click()
+		await page.locator('details.lang summary').click()
+		await page.getByRole('link', { name: /English/ }).click()
 		await page.waitForURL(/\/en\/account$/)
 		// Экран входа рисует остров после запроса состояния, его и ждём.
 		await page.getByRole('heading', { name: 'Sign in first' }).waitFor()
@@ -345,8 +390,10 @@ describe('языки', () => {
 		// Выбор в cookie сильнее Accept-Language: русская ссылка теперь ведёт на английскую.
 		await page.goto(new URL('/login', http.base).href)
 		assert.equal(new URL(page.url()).pathname, '/en/login')
+		assert.equal(await page.locator('details.lang summary').getAttribute('aria-label'), 'Language: English')
 
-		await page.locator('a.lang').click()
+		await page.locator('details.lang summary').click()
+		await page.getByRole('link', { name: /Русский/ }).click()
 		await page.waitForURL(/\/login$/)
 		assert.equal(await page.locator('html').getAttribute('lang'), 'ru')
 		await context.close()
@@ -401,9 +448,10 @@ describe('языки', () => {
 
 		await page.goto(url)
 		await page.locator('input[name="token"]').fill('bad')
-		await page.locator('button[type="submit"]').click()
-		await page.waitForURL(/\/en\/login/)
-		assert.match(await page.locator('main').innerText(), /The token did not fit/)
+		// Ждём адрес с ошибкой: `/en/login` был и до отправки, текст читался бы со старой.
+		await Promise.all([page.waitForURL(/\/en\/login#.*error=/), page.locator('button[type="submit"]').click()])
+		await page.waitForSelector('[role=alert]')
+		assert.match(await page.locator('[role=alert]').innerText(), /The token did not fit/)
 		await context.close()
 	})
 
@@ -420,8 +468,18 @@ describe('скриншоты', () => {
 		const { url: login } = await authorize()
 		const loginError = `${login}&error=${encodeURIComponent('Токен не подошёл')}`
 		const telegram = `/login/telegram#request=r&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&dev=42`
-		const screens: Record<string, [string, OpenOptions?]> = {
+		const langMenu: ScreenOptions = {
+			prepare: async (page) => {
+				const menu = page.locator('details.lang')
+
+				await menu.locator('summary').click()
+				// Иначе снимок ловит шеврон посреди поворота, а рамку -- посреди перекраски.
+				await menu.evaluate((node) => Promise.all(node.getAnimations({ subtree: true }).map((a) => a.finished)))
+			},
+		}
+		const screens: Record<string, [string, ScreenOptions?]> = {
 			landing: ['/'],
+			'lang-menu': ['/', langMenu],
 			login: [login],
 			'login-error': [loginError],
 			telegram: [telegram],
@@ -430,6 +488,7 @@ describe('скриншоты', () => {
 			'account-guest': ['/account'],
 			account: ['/account', { cookie: true }],
 			'en.landing': ['/en/'],
+			'en.lang-menu': ['/en/', langMenu],
 			'en.login': [login.replace('/login', '/en/login')],
 			'en.telegram': [`/en${telegram}`],
 			'en.error': [
@@ -440,7 +499,7 @@ describe('скриншоты', () => {
 			'en.account': ['/en/account', { cookie: true }],
 		}
 
-		for (const [name, [path, options]] of Object.entries(screens)) {
+		for (const [name, [path, { prepare, ...options } = {}]] of Object.entries(screens)) {
 			for (const scheme of ['light', 'dark'] as const) {
 				for (const [label, width] of [
 					['desktop', 1280],
@@ -448,6 +507,7 @@ describe('скриншоты', () => {
 				] as const) {
 					const { page, context } = await open(path, { ...options, scheme, width })
 
+					await prepare?.(page)
 					await page.screenshot({ path: join(SHOTS, `${name}.${scheme}.${label}.png`), fullPage: true })
 					await context.close()
 				}

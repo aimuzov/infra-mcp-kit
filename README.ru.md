@@ -27,7 +27,7 @@
 - [**Страницы**](#страницы): Astro-интеграция `mcpPages()` с лендингом, входом, страницами ошибки и 404 в стиле «Сигнал».
 - [**Тесты**](#тесты): клиенты в памяти и по HTTP и весь OAuth-поток для `node --test`.
 - [**Actions**](#actions) `check` и `publish` для workflow серверов.
-- [**Переезд с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
+- [**Переезд на infra-site-kit 5**](#переезд-на-infra-site-kit-5), [**с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
 
 ## Установка
 
@@ -152,19 +152,31 @@ export default defineConfig({
 - `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
-- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.8.1`, см. [ниже](#переезд-на-infra-site-kit-5).
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
 ### Языки
 
-С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
+С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется меню языков из infra-site-kit, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
 
 Английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
 
 Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
-При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Переключатель запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Меню запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+
+### Переезд на infra-site-kit 5
+
+Страницы проверены на infra-site-kit 5.8.1, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
+```
+
+- 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
+- 5.1 превращает переключатель языка в меню: `details.lang` со ссылкой на каждый язык вместо ссылки `a.lang` на другой. Тест сервера, который кликал `a.lang`, сначала открывает меню: `page.locator('details.lang summary').click()`, потом `page.getByRole('link', { name: /English/ })`.
+- Сервер на 4.2 продолжает работать: кит не берёт ничего, чего нет в 4.2, просто в шапке остаётся старая ссылка.
 
 ## Тесты
 
@@ -227,7 +239,7 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 
 3.0 работает на [tmcp](https://github.com/paoloricciuti/tmcp) вместо официального SDK и на `node:http` вместо express. Рантайм размещённого сервера худеет с 27 МБ в 98 пакетах до 12 МБ в 15, из них 8 МБ — zod. Выданные токены и `auth.db` остаются как есть: переподключаться никому не придётся.
 
-1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4. SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
+1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4, переведи infra-site-kit на `#v5.8.1`, как [выше](#переезд-на-infra-site-kit-5). SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
 2. Импорты: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` и другие типы результатов берутся из `@aimuzov/infra-mcp-kit`. У `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` и `server.server.elicitInput()` сигнатуры SDK.
 3. Исключение в обработчике — результат с `isError`, как у `tool()`; в списке инструментов схема входа та же, что у SDK.
 4. `createHttpApp` отдаёт `{ handle, listener, context }`: `handle(request)` принимает `Request` и отдаёт `Response`, `listener` идёт в `node:http`. `startHttp` принимает само приложение, `.app` больше нет.

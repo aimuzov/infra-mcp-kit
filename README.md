@@ -94,9 +94,9 @@ await serveHttp({
 
 - `POST /mcp` builds a new server and transport for every request. With `auth` it wants a Bearer token, other methods get 405.
 - `GET /health` answers `{ "ok": true }`.
-- OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` and `/authorize/callback`.
+- OAuth: metadata under `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke`, `/authorize/callback` and `/authorize/page`.
 - The pages from `publicDir`, `/x` serves `x.html`. A browser gets `404.html` for an unknown route and the `/error` page for a failure, `fetch` gets JSON.
-- `routes(request, context)` adds the service's own API: a `Response`, or `undefined` to pass the request on.
+- `routes(request, context)` adds the service's own API: a `Response`, or `undefined` to pass the request on. An array runs in order, the first `Response` wins.
 
 `loadHttpConfig()` reads `PUBLIC_URL` (an origin, https outside loopback), `AUTH_SECRET` (at least 32 characters, `openssl rand -base64 48`), `PORT` (8080) and `ALLOWED_REDIRECT_URIS`. Claude's callbacks and loopback addresses are always allowed, the list adds to them.
 
@@ -113,9 +113,41 @@ Sign-in is a static page plus a `complete({ request, query, form })` hook that t
 - `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
 - `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message. `hide` drops the fields the server knows on its own, see [Token form](#token-form).
 
-The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
+The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy. Anyone can put a fragment into a link, so whatever decides whom the person trusts comes from the server: the page gets `Login.pageData` from `GET /authorize/page`.
 
 For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cookie, `requireSession(sessions, request)` gives the session or a 401 `Response`, `sameOrigin(publicUrl, request)` a 403 to a foreign `Origin`, `sendJson` and `apiError` build responses in one shape.
+
+Over https the sign-in cookies carry the `__Host-` prefix, a custom session name too. The browser accepts such a cookie only from the host itself, so a sibling subdomain cannot plant its own session or sign-in state through the shared parent domain. On http localhost the names have no prefix.
+
+Over https `sessions` does not read a session issued before the prefix: anyone could have planted a cookie without it. So after the update everyone who signed in before it signs in again.
+
+### Telegram
+
+```ts
+const telegram = loadTelegramConfig(process.env, config.publicUrl)
+const tokens = new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href })
+const account = sessions(tokens, config.publicUrl)
+
+await serveHttp({
+	...options,
+	auth: { store, tokens, login: telegramLogin(telegram) },
+	routes: [telegramAccount({ ...telegram, sessions: account }), cabinet(account)],
+})
+```
+
+`loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback. `telegramAccount` checks a `devUserId` passed by hand too: with `PUBLIC_URL` outside loopback it does not work and only leaves a warning in the log.
+
+The pages are built without this env, so the server hands them the bot name at runtime: `telegramLogin({ botToken, botName })` gives it to `/login/telegram` through `GET /authorize/page`, `telegramAccount` to `/account/signin` through `GET /account/auth`. The page never takes the bot from the fragment, or a link could show someone else's bot.
+
+`telegramAccount` signs a person in to the account with Telegram and keeps them in the session cookie:
+
+- `GET /account/auth` gives the sign-in page the bot name and the dev id, and a one-time state in the httpOnly `mcp_signin` cookie for 10 minutes.
+- `GET /account/login` is where the widget brings the person back. The kit checks the signature, its age, a replay and the state, sets the session cookie and redirects to `/account` in the language of the page. A link without a signature leads to `/account/signin`, so the "Sign in" of `AccountShell` works as is.
+- `POST /account/logout` clears the session, only from the service's own `Origin`.
+
+A signature works once for both sign-ins: the widget signs only the person and the time, so one spent in `telegramLogin` does not open the account, and the other way round. The journal of spent signatures lives in the process memory: after a restart or in another process, a signature younger than 10 minutes passes once more.
+
+The state closes login CSRF: without it, someone else's signed link would silently put a person into a stranger's account, and they would upload their data there. `sessions` defaults to the kit's `mcp_session`, `__Host-mcp_session` over https; pass the same `sessions` your routes read with `requireSession`. `claims(user)` replaces `{ name }` in the session, `sub` is always the Telegram id.
 
 ## Pages
 
@@ -146,7 +178,7 @@ export default defineConfig({
 })
 ```
 
-- `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm` and `/login/telegram` with `telegram: { botName, grants }`. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
+- `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm`, `/login/telegram` with `telegram: { grants }` and the account sign-in `/account/signin` with `telegram: { account: true }`. The bot name comes from the server at runtime. `telegram.botName` is a fallback for `/login/telegram` only, when the server sends none: `/account/signin` takes the bot from `/account/auth` alone, so `telegramAccount` without `botName` does not build unless it is the dev sign-in. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
 - The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
 - A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
 - Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`. infra-site-kit goes in as `github:aimuzov/infra-site-kit#v5.8.1`, see [below](#moving-to-infra-site-kit-5).
@@ -291,6 +323,8 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `connectInMemory` and `connectHttp` give an SDK client. `expectTools` compares the tool list, `textOf` joins a text result.
 - `startHttp` listens on a random port of 127.0.0.1.
 - `oauthFlow` runs register, authorize, sign-in, callback and the code exchange. `submitForm`, `telegramSigned` and `devLink` cover the ready sign-ins, `exchangeAgain` and `refresh` check single use.
+- `accountLogin(base, { user, botToken })` signs in to the account through `telegramAccount` like the page and the widget do, and gives the `Cookie` header. `'dev'` takes the dev link instead.
+- `freshTelegramLogin(user, botToken)` signs a sign-in like the widget, each call with its own `auth_date`: the same fields in the same second give the same signature, and the kit takes it for a replay. An `auth_date` in `user` replaces the chosen one, and then two calls can give one signature again. `telegramSigned` and `accountLogin` sign with it.
 - `fakePages()` gives a `publicDir` without building Astro.
 
 ## Actions

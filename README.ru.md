@@ -94,9 +94,9 @@ await serveHttp({
 
 - `POST /mcp` создаёт новый сервер и транспорт на каждый запрос. С `auth` требует Bearer-токен, другие методы получают 405.
 - `GET /health` отвечает `{ "ok": true }`.
-- OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke` и `/authorize/callback`.
+- OAuth: метаданные в `/.well-known/`, `/register`, `/authorize`, `/token`, `/revoke`, `/authorize/callback` и `/authorize/page`.
 - Страницы из `publicDir`, `/x` отдаёт `x.html`. Браузер на неизвестный адрес получает `404.html`, при сбое — страницу `/error`, `fetch` получает JSON.
-- `routes(request, context)` добавляет собственное API сервиса: `Response` или `undefined`, чтобы пропустить запрос дальше.
+- `routes(request, context)` добавляет собственное API сервиса: `Response` или `undefined`, чтобы пропустить запрос дальше. Массив идёт по порядку, отвечает первый `Response`.
 
 `loadHttpConfig()` читает `PUBLIC_URL` (origin, https везде, кроме loopback), `AUTH_SECRET` (от 32 символов, `openssl rand -base64 48`), `PORT` (8080) и `ALLOWED_REDIRECT_URIS`. Колбэки Claude и loopback-адреса разрешены всегда, список добавляется к ним.
 
@@ -113,9 +113,41 @@ await serveHttp({
 - `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
 - `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом. `hide` убирает поля, которые сервер знает сам, см. [Форма входа по токену](#форма-входа-по-токену).
 
-Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
+Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси. Фрагмент в ссылке подставит кто угодно, поэтому то, что решает, кому человек доверится, страница берёт с сервера: `Login.pageData` она получает по `GET /authorize/page`.
 
 Для кабинета: `sessions(tokens, publicUrl)` даёт подписанную httpOnly-куку, `requireSession(sessions, request)` отдаёт сессию или `Response` 401, `sameOrigin(publicUrl, request)` — 403 на чужой `Origin`, `sendJson` и `apiError` собирают ответы в одном формате.
+
+На https куки входа носят префикс `__Host-`, и своё имя сессии тоже. Такую куку браузер примет только от самого хоста, поэтому соседний поддомен не подложит свою сессию или метку входа через общий родительский домен. На http-localhost имена без префикса.
+
+Сессию, выданную до префикса, `sessions` на https не читает: куку без префикса мог подложить кто угодно. Поэтому после обновления все, кто вошёл до него, входят заново.
+
+### Telegram
+
+```ts
+const telegram = loadTelegramConfig(process.env, config.publicUrl)
+const tokens = new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href })
+const account = sessions(tokens, config.publicUrl)
+
+await serveHttp({
+	...options,
+	auth: { store, tokens, login: telegramLogin(telegram) },
+	routes: [telegramAccount({ ...telegram, sessions: account }), cabinet(account)],
+})
+```
+
+`loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback. `telegramAccount` проверяет и `devUserId`, переданный руками: при `PUBLIC_URL` не на loopback он не работает, а только оставляет предупреждение в логе.
+
+Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме: `telegramLogin({ botToken, botName })` отдаёт его `/login/telegram` через `GET /authorize/page`, `telegramAccount` — `/account/signin` через `GET /account/auth`. Из фрагмента бота страница не берёт: иначе ссылка показала бы виджет чужого бота.
+
+`telegramAccount` пускает человека в кабинет через Telegram и держит его в куке сессии:
+
+- `GET /account/auth` отдаёт странице входа имя бота и dev-id, а ещё одноразовую метку в httpOnly-куке `mcp_signin` на 10 минут.
+- `GET /account/login` — сюда виджет возвращает человека. Кит проверяет подпись, её возраст, повтор и метку, ставит куку сессии и уводит в `/account` на языке страницы. Ссылка без подписи ведёт на `/account/signin`, поэтому «Войти» из `AccountShell` работает как есть.
+- `POST /account/logout` стирает сессию, только со своего `Origin`.
+
+Подпись годится один раз на оба входа: виджет подписывает только человека и время, поэтому потраченная в `telegramLogin` не откроет кабинет, и наоборот. Журнал потраченных подписей живёт в памяти процесса: после рестарта или в соседнем процессе подпись моложе 10 минут пройдёт ещё раз.
+
+Метка закрывает login CSRF: без неё чужая подписанная ссылка тихо пустила бы человека в чужой кабинет, и он загрузил бы туда свои данные. `sessions` по умолчанию — `mcp_session` кита, на https — `__Host-mcp_session`; передай те же `sessions`, по которым твои маршруты зовут `requireSession`. `claims(user)` заменяет `{ name }` в сессии, `sub` — всегда Telegram id.
 
 ## Страницы
 
@@ -149,7 +181,7 @@ export default defineConfig({
 })
 ```
 
-- `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
+- `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm`, `/login/telegram` с `telegram: { grants }` и вход в кабинет `/account/signin` с `telegram: { account: true }`. Имя бота приходит с сервера в рантайме. `telegram.botName` — запасное только для `/login/telegram`, если сервер его не прислал: `/account/signin` берёт бота лишь из `/account/auth`, поэтому `telegramAccount` без `botName` не соберётся, если это не dev-вход. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
 - Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.8.1`, см. [ниже](#переезд-на-infra-site-kit-5).
@@ -294,6 +326,8 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `connectInMemory` и `connectHttp` дают клиента SDK. `expectTools` сверяет список инструментов, `textOf` склеивает текстовый ответ.
 - `startHttp` слушает случайный порт на 127.0.0.1.
 - `oauthFlow` проходит регистрацию, авторизацию, вход, колбэк и обмен кода. `submitForm`, `telegramSigned` и `devLink` покрывают готовые способы входа, `exchangeAgain` и `refresh` проверяют одноразовость.
+- `accountLogin(base, { user, botToken })` входит в кабинет через `telegramAccount`, как это делают страница и виджет, и отдаёт заголовок `Cookie`. `'dev'` идёт по dev-ссылке.
+- `freshTelegramLogin(user, botToken)` подписывает вход, как виджет, и у каждого вызова своя `auth_date`: те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. `auth_date` из `user` заменяет выбранную, и с ней два вызова снова могут дать одну подпись. Ей подписывают `telegramSigned` и `accountLogin`.
 - `fakePages()` даёт `publicDir` без сборки Astro.
 
 ## Actions

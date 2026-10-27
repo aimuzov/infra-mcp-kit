@@ -66,8 +66,12 @@ export type HttpAppOptions = {
 	 * статическая страница, поэтому с `auth` нужен и `publicDir`.
 	 */
 	auth?: HttpAuthOptions
-	/** Свои маршруты, например API кабинета. Идут после OAuth, `/mcp` и страниц, до 404. */
-	routes?: Route
+	/**
+	 * Свои маршруты, например API кабинета. Идут после OAuth, `/mcp` и страниц, до 404.
+	 * Несколько -- по порядку, отвечает первый, кто вернул `Response`: так рядом встают
+	 * готовые маршруты кита, например `telegramAccount`.
+	 */
+	routes?: Route | Route[]
 	/** Куда писать ошибки `/mcp` и входа. По умолчанию общий `log` кита. */
 	logger?: Logger
 	/**
@@ -122,6 +126,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			? auth.tokens
 			: new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href, mode: auth?.tokens ?? 'sign' })
 	const context: HttpContext = { config, service, mcpUrl, tokens, logger }
+	const ownRoutes = [options.routes ?? []].flat()
 
 	// Английские страницы mcpPages кладёт в `en/`: нет каталога -- сервер говорит только по-русски.
 	if (publicDir) enableLocales(existsSync(join(publicDir, 'en')) ? ['ru', 'en'] : ['ru'])
@@ -205,9 +210,11 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			if (page) return page
 		}
 
-		const own = await options.routes?.(request, context)
+		for (const own of ownRoutes) {
+			const response = await own(request, context)
 
-		if (own) return own
+			if (response) return response
+		}
 
 		if (publicDir && wantsPage(request)) {
 			const locale = localeOfPath(pathname)

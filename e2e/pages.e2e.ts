@@ -11,6 +11,7 @@ import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 
+import { telegramAccount } from '#kit/http/account/telegram'
 import { createHttpApp } from '#kit/http/app'
 import { tokenFormLogin } from '#kit/http/login/token-form'
 import { LoginError } from '#kit/http/oauth/provider'
@@ -72,16 +73,23 @@ function connector(hide: string[]) {
 
 				return server
 			},
-			// Кабинет фикстуры: cookie `fixture=1` -- вошёл, без неё 401.
-			routes: (request) => {
-				if (request.method !== 'GET' || new URL(request.url).pathname !== '/account/state') return undefined
+			routes: [
+				// Бот из окружения рантайма, у сборки в astro.config.mjs другой.
+				telegramAccount({ botToken: '1:fixture', botName: 'fixture_runtime_bot' }),
+				// Кабинет фикстуры: cookie `fixture=1` -- вошёл, без неё 401.
+				(request) => {
+					if (request.method !== 'GET' || new URL(request.url).pathname !== '/account/state') return undefined
 
-				if (!(request.headers.get('cookie') ?? '').includes('fixture=1')) {
-					return Response.json({ error: { code: 'unauthorized', message: 'Нужно войти' } }, { status: 401 })
-				}
+					if (!(request.headers.get('cookie') ?? '').includes('fixture=1')) {
+						return Response.json(
+							{ error: { code: 'unauthorized', message: 'Нужно войти' } },
+							{ status: 401 },
+						)
+					}
 
-				return Response.json({ name: 'Алексей', corpus: 'ready' })
-			},
+					return Response.json({ name: 'Алексей', corpus: 'ready' })
+				},
+			],
 		}),
 	)
 }
@@ -286,6 +294,60 @@ describe('острова', () => {
 		assert.equal(await me.page.locator('[data-corpus]').innerText(), 'ready')
 		assert.match(await me.page.locator('main').innerText(), /Привет, Алексей/)
 		await me.context.close()
+	})
+
+	test('вход в кабинет через Telegram: от кнопки гостя до виджета с ботом из рантайма', async () => {
+		const { page, context } = await open('/account')
+
+		await Promise.all([page.waitForURL(/\/account\/signin$/), page.click('a.account__login')])
+
+		const widget = page.locator('script[data-telegram-login]')
+
+		await widget.waitFor({ state: 'attached' })
+		assert.equal(await widget.getAttribute('data-telegram-login'), 'fixture_runtime_bot')
+
+		assert.match(
+			(await widget.getAttribute('data-auth-url')) ?? '',
+			/^http:\/\/127\.0\.0\.1:\d+\/account\/login\?state=[\w-]{32}$/,
+		)
+
+		assert.ok((await context.cookies()).some((cookie) => cookie.name === 'mcp_signin' && cookie.httpOnly))
+		await context.close()
+
+		const en = await open('/en/account/signin')
+
+		await en.page.locator('script[data-telegram-login]').waitFor({ state: 'attached' })
+
+		assert.match(
+			(await en.page.locator('script[data-telegram-login]').getAttribute('data-auth-url')) ?? '',
+			/\/en\/account\/login\?state=/,
+		)
+
+		await en.context.close()
+	})
+
+	test('OAuth-вход через Telegram берёт бота с сервера, без него -- со сборки, но не из фрагмента', async () => {
+		// Бот во фрагменте -- чужой: ссылку с ним подсунул бы фишер.
+		const hash = 'request=r&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&bot=evil_bot'
+
+		// У фикстуры вход формой токена: сервер с `telegramLogin({ botName })` подменяем.
+		for (const [server, bot] of [
+			['runtime_bot', 'runtime_bot'],
+			[undefined, 'fixture_bot'],
+		] as const) {
+			const { page, context } = await open(`/login/telegram#${hash}`)
+
+			if (server) {
+				await page.route('**/authorize/page', (route) => route.fulfill({ json: { bot: server } }))
+				await page.reload()
+			}
+
+			const widget = page.locator('script[data-telegram-login]')
+
+			await widget.waitFor({ state: 'attached' })
+			assert.equal(await widget.getAttribute('data-telegram-login'), bot)
+			await context.close()
+		}
 	})
 
 	test('ошибка показывает текст из query как текст, а не разметку', async () => {
@@ -669,6 +731,7 @@ describe('скриншоты', () => {
 			'not-found': ['/nope'],
 			'account-guest': ['/account'],
 			account: ['/account', { cookie: true }],
+			'account-signin': ['/account/signin'],
 			'en.landing': ['/en/'],
 			'en.lang-menu': ['/en/', langMenu],
 			'en.login': [login.replace('/login', '/en/login')],
@@ -679,6 +742,7 @@ describe('скриншоты', () => {
 			'en.not-found': ['/en/nope'],
 			'en.account-guest': ['/en/account'],
 			'en.account': ['/en/account', { cookie: true }],
+			'en.account-signin': ['/en/account/signin'],
 			'landing-slots': ['/landing'],
 			'en.landing-slots': ['/en/landing'],
 		}

@@ -6,12 +6,27 @@
 	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 	import { callbackUrl, readLoginContext, type LoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
 
-	type Props = { service: string; botName: string; grants?: string[]; locale?: string }
+	type Props = {
+		service: string
+		/** Имя бота со сборки. Сервер с `telegramLogin({ botName })` присылает своё через `src`. */
+		botName?: string
+		/** Откуда брать бота сервера: `GET /authorize/page` из OAuth кита. */
+		src?: string
+		grants?: string[]
+		locale?: string
+	}
 
-	let { service, botName, grants = [], locale = 'ru' }: Props = $props()
+	let { service, botName = '', src = '/authorize/page', grants = [], locale = 'ru' }: Props = $props()
 
 	let context = $state<LoginContext | null>(null)
 	let widget = $state<HTMLElement>()
+
+	// Бот сервера, `null` -- ещё не ответил. Только с сервера: фрагмент в ссылке подставит
+	// кто угодно, и виджет попросил бы человека довериться чужому боту.
+	let serverBot = $state<string | null>(null)
+
+	// Бот из окружения сервера главнее бота со сборки: страницу обычно собирают без окружения прода.
+	const bot = $derived(serverBot === null ? '' : serverBot || botName)
 
 	const devUrl = $derived.by(() => {
 		if (!context?.dev) return ''
@@ -27,16 +42,24 @@
 		context = readLoginContext()
 	})
 
+	// Сервер без `/authorize/page` или без бота -- остаётся бот со сборки.
+	$effect(() => {
+		fetch(src, { headers: { accept: 'application/json' } })
+			.then((res) => (res.ok ? res.json() : {}))
+			.then((data: { bot?: unknown }) => (serverBot = typeof data.bot === 'string' ? data.bot : ''))
+			.catch(() => (serverBot = ''))
+	})
+
 	// Виджет вставляем скриптом: его data-auth-url собирается из фрагмента, а он есть только
 	// в браузере. Источники telegram.org пускает CSP этой страницы, остальные их не знают.
 	$effect(() => {
-		if (!widget || !context?.request || context.dev) return
+		if (!widget || !context?.request || context.dev || !bot) return
 
 		const script = document.createElement('script')
 
 		script.async = true
 		script.src = 'https://telegram.org/js/telegram-widget.js?22'
-		script.dataset.telegramLogin = botName
+		script.dataset.telegramLogin = bot
 		script.dataset.size = 'large'
 		script.dataset.authUrl = callbackUrl(context).href
 		widget.append(script)
@@ -64,32 +87,11 @@
 			<Alert variant="danger">{pt(locale, 'login.broken')}</Alert>
 		{:else if devUrl}
 			<a class="telegram__dev" href={devUrl}>{pt(locale, 'login.dev', { id: context?.dev ?? '' })}</a>
+		{:else if context && serverBot !== null && !bot}
+			<Alert variant="danger">{pt(locale, 'login.telegramMissing')}</Alert>
 		{:else}
 			<div class="telegram" bind:this={widget}></div>
 		{/if}
 		<p class="hint hint--center">{pt(locale, 'login.ignore')}</p>
 	</Card>
 </div>
-
-<style>
-	.telegram {
-		min-height: 40px;
-	}
-
-	.telegram__dev {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 2.75rem;
-		border-radius: var(--ui-radius-sm);
-		font-weight: 600;
-		color: #fff;
-		text-decoration: none;
-		background: #2aabee;
-
-		&:hover {
-			color: #fff;
-			background: #1e96d4;
-		}
-	}
-</style>

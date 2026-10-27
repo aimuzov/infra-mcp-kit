@@ -1,6 +1,5 @@
 import { kt, requestLocale } from '#kit/i18n'
 
-import { isLoopback } from './config.ts'
 import { apiError } from './json.ts'
 import type { TokenClaims, Tokens } from './oauth/tokens.ts'
 
@@ -29,22 +28,46 @@ export type Sessions = {
 	clearCookie(): string
 }
 
-/** Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax. */
+/**
+ * Имя и атрибуты cookie входа. На https имя с префиксом `__Host-`: такую cookie
+ * браузер примет только от самого хоста, с Secure, `Path=/` и без `Domain`.
+ * Без префикса сайт на соседнем поддомене поставит cookie с тем же именем
+ * на общий родительский домен, сервер прочтёт её вместо своей, и человек
+ * окажется в чужом кабинете. На http-localhost префикс не годится: браузер
+ * не примет его без Secure.
+ */
+export function hostCookie(name: string, publicUrl: URL): { name: string; attributes: string } {
+	const https = publicUrl.protocol === 'https:'
+
+	return {
+		name: https ? `__Host-${name}` : name,
+		attributes: ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(https ? ['Secure'] : [])].join('; '),
+	}
+}
+
+/**
+ * Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax,
+ * на https -- `__Host-<cookie>` (см. `hostCookie`).
+ *
+ * На https `read` берёт сессию только из `__Host-<cookie>`. Cookie без
+ * префикса мог поставить соседний поддомен, поэтому она не читается, даже
+ * выданная до префикса: после обновления такие люди входят заново.
+ */
 export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session'): Sessions {
-	const attributes = ['Path=/', 'HttpOnly', 'SameSite=Lax', ...(isLoopback(publicUrl) ? [] : ['Secure'])].join('; ')
+	const { name, attributes } = hostCookie(cookie, publicUrl)
 
 	return {
 		async read(request) {
-			const token = readCookie(request, cookie)
+			const token = readCookie(request, name)
 
 			return token ? tokens.verify('session', token) : null
 		},
 		async cookie(claims) {
-			const value = encodeURIComponent(await tokens.sign('session', claims))
+			const token = await tokens.sign('session', claims)
 
-			return `${cookie}=${value}; Max-Age=${tokens.ttl.session}; ${attributes}`
+			return `${name}=${encodeURIComponent(token)}; Max-Age=${tokens.ttl.session}; ${attributes}`
 		},
-		clearCookie: () => `${cookie}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
+		clearCookie: () => `${name}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
 	}
 }
 

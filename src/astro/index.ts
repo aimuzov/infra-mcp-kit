@@ -59,6 +59,18 @@ export type TokenField = {
 	required?: boolean
 }
 
+export type TelegramPages = {
+	/**
+	 * Имя бота для `/login/telegram` на случай, если сервер его не прислал. `/account/signin`
+	 * берёт бота только из `/account/auth`. Страницы обычно собирают без окружения прода,
+	 * поэтому имя лучше отдать в рантайме: `telegramLogin({ botName })` и `telegramAccount`.
+	 */
+	botName?: string
+	grants?: string[]
+	/** Страница `/account/signin`: вход в кабинет через Telegram. Сервер берёт `telegramAccount`. */
+	account?: boolean
+}
+
 export type McpPagesOptions = {
 	service: PagesService
 	/**
@@ -67,7 +79,7 @@ export type McpPagesOptions = {
 	 */
 	tokenForm?: TokenForm
 	/** Вход через Telegram, страница `/login/telegram`. Сервер берёт `telegramLogin`. */
-	telegram?: { botName: string; grants?: string[] }
+	telegram?: TelegramPages
 	/** Страницы кита, которые сервис рисует сам, например свой лендинг. */
 	override?: Array<'index' | 'error' | '404'>
 	/**
@@ -166,6 +178,7 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 					['/', 'index.astro', !skip.has('index')],
 					['/login', 'login.astro', Boolean(options.tokenForm)],
 					['/login/telegram', 'telegram.astro', Boolean(options.telegram)],
+					['/account/signin', 'account-signin.astro', Boolean(options.telegram?.account)],
 					['/error', 'error.astro', !skip.has('error')],
 					['/404', '404.astro', !skip.has('404')],
 				]

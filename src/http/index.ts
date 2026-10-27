@@ -20,10 +20,18 @@ export {
 } from './config.ts'
 export { apiError, errorPage, requireSession, sendJson, type ApiError, type ErrorPageOptions } from './json.ts'
 export {
+	SIGNIN_COOKIE,
+	telegramAccount,
+	type TelegramAccountAuth,
+	type TelegramAccountOptions,
+} from './account/telegram.ts'
+export {
+	loadTelegramConfig,
 	signTelegramLogin,
 	telegramLogin,
 	telegramUser,
 	verifyTelegramLogin,
+	type TelegramConfig,
 	type TelegramLoginOptions,
 	type TelegramUser,
 } from './login/telegram.ts'
@@ -44,6 +52,7 @@ export {
 	OAuthError,
 	oauthRouter,
 	ownClaims,
+	PAGE_DATA_PATH,
 	readBody,
 	readForm,
 	redirectUriMatches,

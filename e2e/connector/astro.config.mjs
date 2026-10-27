@@ -63,8 +63,10 @@ export default defineConfig({
 			// Те же поля берёт сервер: `tokenFormLogin({ fields: loginForm.fields })`.
 			tokenForm: loginForm,
 			telegram: {
+				// Запасной бот со сборки: сервер присылает свой из окружения рантайма.
 				botName: 'fixture_bot',
 				grants: ['читать твои данные', 'писать от твоего имени'],
+				account: true,
 			},
 			// Перевод первой карточки -- ключами `card.account.*` в `strings.en`, второй -- `{ ru, en }`.
 			landing: {

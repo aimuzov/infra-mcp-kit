@@ -18,7 +18,7 @@ import {
 	UnsupportedGrantTypeError,
 	type OAuthClient,
 } from './errors.ts'
-import { CALLBACK_PATH, KitOAuthProvider, LoginError, type ProviderOptions } from './provider.ts'
+import { CALLBACK_PATH, KitOAuthProvider, LoginError, PAGE_DATA_PATH, type ProviderOptions } from './provider.ts'
 
 export type OAuthOptions = ProviderOptions & {
 	mcpUrl: URL
@@ -306,6 +306,8 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		'/authorize': authorize,
 		'/token': token,
 		'/revoke': revoke,
+		[PAGE_DATA_PATH]: async (request) =>
+			request.method === 'GET' ? json(login.pageData ?? {}) : methodNotAllowed('GET'),
 	}
 
 	async function handle(request: Request): Promise<Response | undefined> {

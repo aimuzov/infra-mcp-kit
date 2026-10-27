@@ -1,4 +1,4 @@
-import { LOCALES, localizePath, pick, type Localized, type Strings } from '#kit/i18n'
+import { LOCALES, localizePath, pick, type Locale, type Localized, type Strings } from '#kit/i18n'
 
 /** Свои карточки лендинга поверх его разметки: героя, "Подключить" и инструментов. */
 export type PagesLanding = {
@@ -39,11 +39,15 @@ const PLACES: readonly LandingPlace[] = ['hero', 'connect', 'tools']
  * Карточки лендинга из конфига: без повторов имени, с заголовком и ссылками, которые можно
  * показать. Плохая карточка роняет сборку, а не тихо пропадает со страницы.
  */
-export function checkLanding(landing: PagesLanding | undefined, strings?: Strings): void {
+export function checkLanding(
+	landing: PagesLanding | undefined,
+	strings?: Strings,
+	locales: readonly Locale[] = LOCALES,
+): void {
 	const ids = new Set<string>()
 	// Тот же текст, что покажет `own` на странице языка: перевод по ключу сильнее конфига.
 	const filled = (key: string, value: Localized | undefined) =>
-		LOCALES.every((locale) => Boolean(strings?.[locale]?.[key] ?? pick(value, locale)))
+		locales.every((locale) => Boolean(strings?.[locale]?.[key] ?? pick(value, locale)))
 
 	for (const card of landing?.cards ?? []) {
 		if (!/^[\w-]+$/.test(card.id ?? '')) throw new Error(`Неподходящее имя карточки лендинга: "${card.id}"`)

@@ -170,7 +170,7 @@ mcpPages({
 
 - `after` puts a card after the hero, after "Connect" or, by default, at the end after the tools.
 - A text is a string or `{ ru, en }`. A translation in `service.strings` by the key `card.<id>.title`, `card.<id>.text` or `card.<id>.link.<i>` wins over it.
-- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else, a repeated `id` or a title or link label empty in one of the languages fails the build.
+- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else, a repeated `id` or a title or link label empty in one of the `locales` fails the build.
 - `primary` makes the link the main button, the others are outlined.
 
 When a card is not enough, say a status island, the service overrides `index` and builds it on the kit's landing with slots: `after-hero`, `after-connect` and the default one at the end. The cards of the config stay in place, and `LandingCard` draws a card of the same look with its own markup inside:

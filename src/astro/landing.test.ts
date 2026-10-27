@@ -48,6 +48,7 @@ test('лендинг: перевод по ключу проверяется та
 	const cards = [card({ title: { ru: 'Кабинет', en: '' }, links: [{ href: '/account', label: 'Открыть' }] })]
 
 	assert.doesNotThrow(() => checkLanding({ cards }, { en: { 'card.account.title': 'Account' } }))
+	assert.doesNotThrow(() => checkLanding({ cards }, undefined, ['ru']))
 	assert.throws(() => checkLanding({ cards: [card()] }, { en: { 'card.account.title': '' } }), /нет заголовка/)
 
 	assert.throws(

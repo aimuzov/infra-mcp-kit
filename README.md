@@ -27,7 +27,7 @@ Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://
 - [**Pages**](#pages): the `mcpPages()` Astro integration with the landing, sign-in, error and 404 pages in the "Signal" style.
 - [**Testing**](#testing): in-memory and HTTP clients and the whole OAuth flow for `node --test`.
 - [**Actions**](#actions) `check` and `publish` for the server workflows.
-- [**Migrating from 2.x**](#migrating-from-2x) and [from 1.x](#migrating-from-1x).
+- [**Moving to infra-site-kit 5**](#moving-to-infra-site-kit-5), [**migrating from 2.x**](#migrating-from-2x) and [from 1.x](#migrating-from-1x).
 
 ## Install
 
@@ -139,18 +139,19 @@ export default defineConfig({
 - The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
 - A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
 - Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`.
+- infra-site-kit goes in as `github:aimuzov/infra-site-kit#v5.5.0`: the kit is checked on that one. The pages still build on 4.1.1 and newer, older `Skeleton` and `InfoTip` write `style` attributes that the CSP refuses. Before 5.1 the header has a single link to the other language instead of the menu.
 
 [`e2e/connector`](e2e/connector) is a working example.
 
 ### Languages
 
-With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
+With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets the infra-site-kit language menu next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
 
 English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
 
 A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
-On the first visit the server sends a person whose browser prefers English to `/en/...`. The switch remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
+On the first visit the server sends a person whose browser prefers English to `/en/...`. The menu remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
 
 ## Testing
 
@@ -207,13 +208,23 @@ Optional inputs of the action:
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
 - `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
 
-The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+## Moving to infra-site-kit 5
+
+The kit's API stays the same, a server only moves its dev dependency:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.5.0
+```
+
+- 5.0 drops the `approach` option of `themePeek`. The kit's theme button never passed it, so only a page of the server that calls `themePeek(node, { approach })` itself has to drop it.
+- 5.1 turns the language switch into a menu: `details.lang` with a link per language instead of the `a.lang` link to the other one. A test of the server that clicked `a.lang` opens the menu first: `page.locator('details.lang summary').click()`, then `page.getByRole('link', { name: /English/ })`.
+- A server that stays on 4.x keeps working: the kit uses nothing that 4.x lacks, its header just shows the old link.
 
 ## Migrating from 2.x
 
 3.0 runs on [tmcp](https://github.com/paoloricciuti/tmcp) instead of the official SDK and on `node:http` instead of express. A hosted server's runtime goes from 27 MB in 98 packages to 12 MB in 15, 8 MB of it zod. Issued tokens and `auth.db` stay as they are: nobody has to reconnect.
 
-1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4. The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
+1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4, move infra-site-kit to `#v5.5.0` as [above](#moving-to-infra-site-kit-5). The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
 2. Imports: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` and the other result types come from `@aimuzov/infra-mcp-kit`. `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` and `server.server.elicitInput()` keep the SDK signatures.
 3. A thrown handler is a result with `isError`, as with `tool()`; the tool list keeps the input schema of the SDK.
 4. `createHttpApp` returns `{ handle, listener, context }`: `handle(request)` takes a `Request` and gives a `Response`, `listener` goes to `node:http`. `startHttp` takes the app itself, `.app` is gone.

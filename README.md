@@ -99,7 +99,7 @@ OAuth rules:
 
 Sign-in is a static page plus a `complete({ request, query, form })` hook that tells who came back:
 
-- `telegramLogin({ botToken, botName })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `botName` reaches the page in the fragment, so the pages build without the production env. `devUserId` enables `?dev=1` on loopback.
+- `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
 - `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
 
 The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
@@ -120,7 +120,9 @@ await serveHttp({
 })
 ```
 
-`loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback. The pages are built without this env, so the server hands them the bot name at runtime.
+`loadTelegramConfig(env, publicUrl)` reads `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` and `TELEGRAM_DEV_USER_ID` (the third argument renames the last one). With the dev id it needs no bot, and the dev id itself only works on loopback.
+
+The pages are built without this env, so the server hands them the bot name at runtime: `telegramLogin({ botToken, botName })` puts it into the fragment of `/login/telegram`, `telegramAccount` gives it to `/account/signin`.
 
 `telegramAccount` signs a person in to the account with Telegram and keeps them in the session cookie:
 

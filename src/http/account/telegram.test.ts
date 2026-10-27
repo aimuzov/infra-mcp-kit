@@ -342,8 +342,8 @@ describe('имя бота в рантайме', () => {
 			},
 		})
 
-		assert.equal(seen?.bot, 'runtime_bot')
-		assert.deepEqual(seen?.context, {})
+		// Бот едет в `Login.context`, как и dev-id: страница берёт его из фрагмента.
+		assert.deepEqual(seen?.context, { bot: 'runtime_bot' })
 
 		const client = await connectHttp(http.base, flow.tokens.access_token)
 

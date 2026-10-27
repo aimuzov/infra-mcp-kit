@@ -99,7 +99,7 @@ await serveHttp({
 
 Вход — это статическая страница и хук `complete({ request, query, form })`, который говорит, кто вернулся:
 
-- `telegramLogin({ botToken, botName })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `botName` доходит до страницы во фрагменте, поэтому страницы собираются без окружения прода. `devUserId` включает `?dev=1` на loopback.
+- `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
 - `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
 
 Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси.
@@ -120,7 +120,9 @@ await serveHttp({
 })
 ```
 
-`loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback. Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме.
+`loadTelegramConfig(env, publicUrl)` читает `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` и `TELEGRAM_DEV_USER_ID` (третий аргумент переименовывает последнюю). С dev-id бот не нужен, а сам dev-id работает только на loopback.
+
+Страницы собираются без этого окружения, поэтому имя бота сервер отдаёт им в рантайме: `telegramLogin({ botToken, botName })` кладёт его во фрагмент `/login/telegram`, `telegramAccount` отдаёт его `/account/signin`.
 
 `telegramAccount` пускает человека в кабинет через Telegram и держит его в куке сессии:
 

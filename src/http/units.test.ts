@@ -130,8 +130,8 @@ test('контекст входа из фрагмента и колбэк с з�
 		client: 'Claude',
 		host: 'claude.ai',
 		error: '',
-		dev: '7',
 		bot: 'thinks_bot',
+		dev: '7',
 	})
 
 	assert.equal(callbackUrl(context, 'https://a.b').href, 'https://a.b/authorize/callback?request=r.1')

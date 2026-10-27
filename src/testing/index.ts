@@ -111,8 +111,6 @@ export type LoginStep = {
 	host: string
 	error: string
 	dev: string
-	/** Имя бота Telegram, которое сервер передал странице. */
-	bot: string
 	/** Остальные ключи фрагмента: то, что сервис положил в `Login.context`. */
 	context: Record<string, string>
 }
@@ -146,7 +144,7 @@ export function loginStep(location: string, base: string): LoginStep {
 
 	assert.ok(get('request'), `в адресе входа нет запроса: ${location}`)
 
-	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev', 'bot'])
+	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev'])
 	const context = Object.fromEntries([...hash].filter(([key]) => !own.has(key)))
 
 	return {
@@ -157,7 +155,6 @@ export function loginStep(location: string, base: string): LoginStep {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
-		bot: get('bot'),
 		context,
 	}
 }

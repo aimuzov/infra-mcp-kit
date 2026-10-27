@@ -11,7 +11,7 @@ export type TokenFormLoginOptions = {
 	/**
 	 * Поля, которых на форме в этом запуске нет: их значение сервер знает сам, например из env.
 	 * Остров прячет их по фрагменту, а сервер не требует и не берёт из формы: в `values` у
-	 * `verify` их нет, даже если кто-то их прислал.
+	 * `verify` их нет, даже если кто-то их прислал. Имена -- латиница, цифры, `_`, `-` и `.`.
 	 */
 	hide?: readonly string[]
 	/**
@@ -23,6 +23,9 @@ export type TokenFormLoginOptions = {
 	page?: string
 }
 
+/** Имя скрываемого поля: латиница, цифры, `_`, `-` и `.`, без разделителя списка. */
+const HIDDEN_NAME = /^[\w.-]+$/
+
 /**
  * Вход по токену стороннего сервиса, как у kaiten: человек вставляет свой API-ключ, кит
  * кладёт его в claims. С ним `Tokens` нужен в режиме `encrypt`, иначе ключ поедет
@@ -32,6 +35,11 @@ export function tokenFormLogin(options: TokenFormLoginOptions): Login {
 	checkTokenFields(options.fields)
 
 	const hide = new Set(options.hide)
+	// Список едет во фрагменте через запятую: запятая в имени разрезала бы его на два поля.
+	const unfit = [...hide].filter((name) => !HIDDEN_NAME.test(name))
+
+	if (unfit.length) throw new Error(`В hide неподходящие имена полей: ${unfit.map((n) => `"${n}"`).join(', ')}`)
+
 	const unknown = [...hide].filter((name) => !options.fields.some((field) => field.name === name))
 
 	// Опечатка в имени оставила бы поле на форме, а сервер молча ждал бы его из env.

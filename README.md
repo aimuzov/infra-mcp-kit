@@ -176,7 +176,7 @@ tokenFormLogin({
 })
 ```
 
-- The page is built before the server knows its env, so `hide` works at runtime: the list travels in the URL fragment (`hide=url`), the island drops those fields after hydration, and `verify` gets no value for them even if someone sends one. A name that is not in the form stops the server start.
+- The page is built before the server knows its env, so `hide` works at runtime: the list travels in the URL fragment (`hide=url`), the island drops those fields after hydration, and `verify` gets no value for them even if someone sends one. A name that is not in the form stops the server start, and so does a hidden name with anything but Latin letters, digits, `_`, `-` and `.`: a comma would split the list.
 - Texts take a string or `{ ru, en }`. A translation in `service.strings` under the keys from [Languages](#languages) still wins, so a config with plain strings keeps working. The server writes its "fill in the field" error with the same labels.
 - `defineTokenForm`, `mcpPages` and `tokenFormLogin` reject a repeated field name and the name `request`, which carries the signed sign-in request.
 - `defineTokenForm` and the `TokenForm` and `TokenFormField` types come from both `/astro` and `/http`. The shared module takes them from `/astro`: that entry loads neither Astro nor the server, so it stays light in the config and at runtime.

@@ -100,6 +100,19 @@ describe('hide у tokenFormLogin', () => {
 			/нет в форме: spcae/,
 		)
 	})
+
+	test('запятая и прочие лишние символы в имени скрываемого поля не дают серверу стартовать', () => {
+		const field = (name: string) => ({ name, label: name })
+		const hiding = (name: string) => () =>
+			tokenFormLogin({ fields: [field(name), field('token')], hide: [name], verify: () => ({ subject: 'u' }) })
+
+		// Фрагмент режет список по запятой: `space,tenant` вернулся бы на страницу двумя полями.
+		assert.throws(hiding('space,tenant'), /неподходящие имена полей: "space,tenant"/)
+		assert.throws(hiding('space url'), /"space url"/)
+		assert.throws(hiding('адрес'), /"адрес"/)
+
+		assert.deepEqual(hiding('kaiten.url-1_a')().context, { hide: 'kaiten.url-1_a' })
+	})
 })
 
 describe('hide через OAuth', () => {

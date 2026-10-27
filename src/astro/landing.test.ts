@@ -49,6 +49,7 @@ test('лендинг: перевод по ключу проверяется та
 
 	assert.doesNotThrow(() => checkLanding({ cards }, { en: { 'card.account.title': 'Account' } }))
 	assert.doesNotThrow(() => checkLanding({ cards }, undefined, ['ru']))
+	assert.throws(() => checkLanding({ cards }, undefined, ['ru', 'en']), /нет заголовка/)
 	assert.throws(() => checkLanding({ cards: [card()] }, { en: { 'card.account.title': '' } }), /нет заголовка/)
 
 	assert.throws(
@@ -95,6 +96,14 @@ test('лендинг: путь страницы получает язык, ос�
 	]) {
 		assert.equal(landingHref(href, 'en'), href)
 	}
+})
+
+test('лендинг: интеграция проверяет тексты только в собираемых языках', () => {
+	const landing = { cards: [card({ title: { ru: 'Кабинет', en: '' } })] }
+
+	assert.doesNotThrow(() => mcpPages({ service: { name: 'x' }, landing }))
+	assert.doesNotThrow(() => mcpPages({ service: { name: 'x' }, landing, locales: ['ru'] }))
+	assert.throws(() => mcpPages({ service: { name: 'x' }, landing, locales: ['ru', 'en'] }), /нет заголовка/)
 })
 
 test('лендинг: интеграция проверяет карточки и отдаёт их страницам', () => {

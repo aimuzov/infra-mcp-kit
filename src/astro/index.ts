@@ -128,8 +128,9 @@ export function serviceCss(service: PagesService): string {
  */
 export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	const skip = new Set(options.override ?? [])
+	const locales = options.locales ?? [DEFAULT_LOCALE]
 
-	checkLanding(options.landing, options.service.strings, options.locales ?? [DEFAULT_LOCALE])
+	checkLanding(options.landing, options.service.strings, locales)
 
 	// Плохой цвет роняет сборку сразу, а не при первой загрузке стилей.
 	serviceCss(options.service)
@@ -156,8 +157,6 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 					['/error', 'error.astro', !skip.has('error')],
 					['/404', '404.astro', !skip.has('404')],
 				]
-
-				const locales = options.locales ?? [DEFAULT_LOCALE]
 
 				for (const locale of locales) {
 					const prefix = locale === DEFAULT_LOCALE ? '' : `/${locale}`

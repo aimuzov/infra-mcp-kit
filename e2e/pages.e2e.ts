@@ -198,6 +198,8 @@ describe('OAuth через статическую страницу входа', 
 
 		await page.fill('input[name=token]', 'good')
 
+		// Колбэк клиента приходит редиректом после POST формы, а `page.route` цель
+		// редиректа не перехватывает. Ловим сам запрос: порт 9 никто не слушает.
 		const [request] = await Promise.all([
 			page.waitForRequest((r) => r.url().startsWith(CLIENT_REDIRECT)),
 			page.click('button[type=submit]'),

@@ -205,9 +205,9 @@ Optional inputs of the action:
 
 - `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
-- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
+- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version. The runner image already has the libraries Chromium needs, so apt runs only when the browser doesn't start without them, with a time limit and three attempts. `--with-deps` used to pull fonts from a slow mirror past the job timeout.
 
-The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch. The kit declares it as an optional peer dependency, so `npm install` stops on an older one: an `ERESOLVE` warning names the conflict, then comes `E404`, because npm looks for a matching version in the registry. If an older one gets in anyway, `mcpPages()` stops `astro check` and `astro build` with the version to install, before Vite fails on `exports`.
 
 ## Migrating from 2.x
 

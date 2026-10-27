@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.4.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.3.0...v3.4.0) (2026-10-27)
+
+
+### Features
+
+* **astro:** describe the token form once and hide its fields at runtime ([9877031](https://github.com/aimuzov/infra-mcp-kit/commit/98770312a65753f6f3bde9d3a97f28d413360840))
+* **astro:** let a service add cards and slots to the landing ([21bd7b3](https://github.com/aimuzov/infra-mcp-kit/commit/21bd7b3838ebf5686a811380294f02d5292ac6ec))
+* **deps:** move the pages to infra-site-kit 5.8.1 with its language menu ([f013037](https://github.com/aimuzov/infra-mcp-kit/commit/f013037e52dd05836a84ddf6de98daad452bd6e6))
+* **http:** Telegram sign-in for the account and the bot name at runtime ([e995b2c](https://github.com/aimuzov/infra-mcp-kit/commit/e995b2cfbbb44f0b2f4bcafbc9896ea688722fe1))
+
+
+### Bug Fixes
+
+* **check:** reliable Chromium install, and an explicit infra-site-kit minimum ([58ae467](https://github.com/aimuzov/infra-mcp-kit/commit/58ae46728e77fd46285306bbe9887b5cf29d4bbf))
+* **http:** read the session only under the Host prefix over https ([fb2c569](https://github.com/aimuzov/infra-mcp-kit/commit/fb2c569430dbaad5ba79db444648f31fd14d0889))
+
 ## [3.3.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.2.1...v3.3.0) (2026-10-27)
 
 

@@ -1,6 +1,6 @@
 {
 	"name": "@aimuzov/infra-mcp-kit",
-	"version": "3.2.0",
+	"version": "3.2.1",
 	"description": "Shared core, hosted OAuth connector, Astro pages and test helpers for the aimuzov MCP servers",
 	"keywords": [
 		"mcp",

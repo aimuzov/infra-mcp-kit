@@ -37,6 +37,8 @@ export type SentryOptions = {
 	transport?: (options: BaseTransportOptions) => Transport
 }
 
+const SEND_TIMEOUT = 2000
+
 let reporter: Reporter | undefined
 const tagged = new AsyncLocalStorage<Tags>()
 
@@ -153,6 +155,8 @@ const fetchTransport = (sentry: Core) => (options: BaseTransportOptions) =>
 			headers: options.headers,
 			// Sentry не перенаправляет, а редирект увёл бы событие на чужой адрес или с https на http.
 			redirect: 'error',
+			// `flush` перестаёт ждать, но запрос не отменяет: зависший приёмник держал бы процесс живым.
+			signal: AbortSignal.timeout(SEND_TIMEOUT),
 		})
 
 		return {
@@ -226,6 +230,6 @@ export function withTags<T>(tags: Tags, run: () => T): T {
 }
 
 /** Дождаться отправки перед выходом: иначе ошибка, уронившая процесс, не дойдёт. */
-export async function flushSentry(timeout = 2000): Promise<void> {
+export async function flushSentry(timeout = SEND_TIMEOUT): Promise<void> {
 	await reporter?.flush(timeout)
 }

@@ -307,6 +307,36 @@ describe('sentry', () => {
 		assert.match(stderr, /Error: crashed/)
 	})
 
+	test('зависший приёмник не держит процесс после отправки', async () => {
+		const ingest = createServer(() => {})
+
+		ingest.listen(0, '127.0.0.1')
+		await once(ingest, 'listening')
+
+		const { port } = ingest.address() as AddressInfo
+		const script = [
+			`const { captureError, flushSentry, initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
+			"await initSentry({ name: 'hang-test', version: '0.0.1' })",
+			"captureError(new Error('stuck'))",
+			'await flushSentry()',
+		].join('\n')
+		const started = Date.now()
+		const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+			env: { ...process.env, SENTRY_DSN: `http://public@127.0.0.1:${port}/1` },
+			stdio: 'ignore',
+		})
+		// Без тайм-аута отправки процесс висит, пока приёмник держит соединение: тест не должен висеть с ним.
+		const kill = setTimeout(() => child.kill(), 10_000)
+		const [code] = await once(child, 'exit')
+
+		clearTimeout(kill)
+		ingest.closeAllConnections()
+		ingest.close()
+
+		assert.equal(code, 0)
+		assert.ok(Date.now() - started < 5000, 'процесс вышел вскоре после тайм-аута отправки')
+	})
+
 	// Отдельный процесс: здесь SDK уже включён с подменённым транспортом, а проверить нужно
 	// настоящую отправку по сети и падение процесса. Вместо Sentry -- локальный сервер.
 	for (const [kind, crash] of [

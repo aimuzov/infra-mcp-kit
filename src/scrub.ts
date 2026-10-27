@@ -26,10 +26,16 @@ const random = (value: string) =>
 const SECRET_KEY = String.raw`[\w-]{0,40}(?:token|secret|passw(?:or)?d|api[_-]?key|credential|signature|session[_-]?id|authorization)[\w-]{0,40}`
 
 const SECRET_FIELD =
-	/token|secret|passw(?:or)?d|api[_-]?key|credential|signature|session[_-]?id|cookie|^(?:proxy-)?auth(?:orization)?$/i
+	/token|secret|passw(?:or)?d|api[_-]?key|credential|signature|session[_-]?id|cookie|authorization|^auth$/i
 
 // Уже вычищенное не трогаем, иначе вторая чистка съела бы пробел перед `[Filtered]`.
 const NOT_FILTERED = String.raw`(?![\s"']*\[Filtered\])`
+
+const HEADER = new RegExp(
+	String.raw`\b((?:proxy-)?authorization|(?:set-)?cookie)(["']?\s*:\s*["']?)${NOT_FILTERED}[^"'\r\n]+`,
+	'gi',
+)
+const PAIR = new RegExp(String.raw`\b(${SECRET_KEY})(["']?\s*[:=]\s*)(["']?)${NOT_FILTERED}([^\s"'&,;)}\]]+)`, 'gi')
 
 const BUILTIN: Replace[] = [
 	// `https://user:pass@host`
@@ -39,14 +45,7 @@ const BUILTIN: Replace[] = [
 	// Первая пара тела формы, `code=...&state=...`: у неё нет `?` впереди.
 	(text) => text.replace(/(^|[\s"'(])([\w.%-]+)=[^\s&#"'<>]+(?=&)/g, `$1$2=${FILTERED}`),
 	// Заголовки в тексте: значение целиком, у cookie это все пары разом.
-	(text) =>
-		text.replace(
-			new RegExp(
-				String.raw`\b((?:proxy-)?authorization|(?:set-)?cookie)(["']?\s*:\s*["']?)${NOT_FILTERED}[^"'\r\n]+`,
-				'gi',
-			),
-			`$1$2${FILTERED}`,
-		),
+	(text) => text.replace(HEADER, `$1$2${FILTERED}`),
 	(text) =>
 		text.replace(/\b(Bearer|Basic)(\s+)([\w~+/.=-]+)/gi, (all, scheme: string, space: string, value: string) =>
 			notWord(value) ? `${scheme}${space}${FILTERED}` : all,
@@ -54,10 +53,8 @@ const BUILTIN: Replace[] = [
 	// `token=...`, `"client_secret": "..."`. После голого двоеточия слово остаётся:
 	// `token: expired` не секрет.
 	(text) =>
-		text.replace(
-			new RegExp(String.raw`\b(${SECRET_KEY})(["']?\s*[:=]\s*)(["']?)${NOT_FILTERED}([^\s"'&,;)}\]]+)`, 'gi'),
-			(all, key: string, separator: string, quote: string, value: string) =>
-				separator.includes('=') || quote || notWord(value) ? `${key}${separator}${quote}${FILTERED}` : all,
+		text.replace(PAIR, (all, key: string, separator: string, quote: string, value: string) =>
+			separator.includes('=') || quote || notWord(value) ? `${key}${separator}${quote}${FILTERED}` : all,
 		),
 	// JWT и JWE: заголовок base64url от `{"` всегда начинается с `eyJ`, у JWE пять частей.
 	(text) => text.replace(/\beyJ[\w-]+(?:\.[\w-]*){1,4}/g, FILTERED),
@@ -109,7 +106,8 @@ const QUERY_FIELD = /(?:^|[._])(?:query|fragment|query_string)$/i
 
 /**
  * Копия значения без секретов. Объекты события SDK делит со scope, поэтому не меняем их,
- * а собираем новые. Глубина ограничена: событие уже нормализовано, глубже ничего не бывает.
+ * а собираем новые. Процессор на чужом scope видит событие до нормализации, где бывают
+ * циклы и любая вложенность: глубже предела объект уходит целиком в `[Filtered]`.
  */
 function scrubValue(value: unknown, key = '', depth = 0): unknown {
 	if (IDS.has(key)) return value
@@ -119,7 +117,9 @@ function scrubValue(value: unknown, key = '', depth = 0): unknown {
 
 	if (typeof value === 'string') return QUERY_FIELD.test(key) ? scrubQuery(value) : scrub(value)
 
-	if (value === null || typeof value !== 'object' || depth > 10) return value
+	if (value === null || typeof value !== 'object') return value
+
+	if (depth > 10) return FILTERED
 
 	if (Array.isArray(value)) return value.map((item) => scrubValue(item, '', depth + 1))
 

@@ -201,6 +201,19 @@ describe('scrubEvent', () => {
 		assert.equal(crumb.data.url, '/x?token=1')
 	})
 
+	test('до нормализации: цикл и глубокая вложенность не вешают чистку и не протекают', () => {
+		const loop: Record<string, unknown> = { note: `token=${KAITEN}` }
+
+		loop.self = loop
+
+		const { extra } = scrubEvent({
+			extra: { loop, 'http.request.header.authorization': `Bearer ${KAITEN}` },
+		})
+
+		assert.ok(!JSON.stringify(extra).includes(KAITEN))
+		assert.equal((extra as Record<string, unknown>)['http.request.header.authorization'], FILTERED)
+	})
+
 	test('query запроса объектом или парами теряет значения, имена остаются', () => {
 		const object = scrubEvent({ request: { query_string: { token: 't', q: 'x' } } })
 		const pairs = scrubEvent({ request: { query_string: [['token', 't']] } })

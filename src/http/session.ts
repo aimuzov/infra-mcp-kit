@@ -56,6 +56,11 @@ const HOST_CLAIM = 'host_cookie'
  * их оттуда, пока нет `__Host-` cookie. Только их: новую сессию под старым
  * именем мог подложить соседний поддомен, поэтому у новых есть claim,
  * которого нет у старых.
+ *
+ * Старую подложить всё ещё можно: от своей сервер её не отличит. Окно
+ * закрывается само. На https `cookie` всегда ставит claim, поэтому через
+ * `ttl.session` после обновления старых сессий не остаётся, если сервис
+ * не подписывает `session` в обход `sessions`.
  */
 export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session'): Sessions {
 	const { name, attributes } = hostCookie(cookie, publicUrl)

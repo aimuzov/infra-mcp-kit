@@ -142,6 +142,16 @@ export default defineConfig({
 
 [`e2e/connector`](e2e/connector) is a working example.
 
+### Languages
+
+With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
+
+English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
+
+A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
+
+On the first visit the server sends a person whose browser prefers English to `/en/...`. The switch remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
+
 ### Landing
 
 A card of the service goes onto the landing with `landing.cards`, no own `index` needed:
@@ -170,7 +180,7 @@ mcpPages({
 
 - `after` puts a card after the hero, after "Connect" or, by default, at the end after the tools.
 - A text is a string or `{ ru, en }`. A translation in `service.strings` by the key `card.<id>.title`, `card.<id>.text` or `card.<id>.link.<i>` wins over it.
-- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else, a repeated `id` or a title or link label empty in one of the `locales` fails the build.
+- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else fails the build, and so do a repeated `id` and an empty title or link label in any of the built languages: those of `locales`, or `ru` alone without them.
 - `primary` makes the link the main button, the others are outlined.
 
 When a card is not enough, say a status island, the service overrides `index` and builds it on the kit's landing with slots: `after-hero`, `after-connect` and the default one at the end. The cards of the config stay in place, and `LandingCard` draws a card of the same look with its own markup inside:
@@ -194,16 +204,6 @@ export const getStaticPaths = localePaths
 	</LandingCard>
 </Landing>
 ```
-
-### Languages
-
-With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
-
-English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
-
-A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
-
-On the first visit the server sends a person whose browser prefers English to `/en/...`. The switch remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
 
 ## Testing
 

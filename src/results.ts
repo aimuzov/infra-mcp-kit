@@ -1,5 +1,6 @@
 import { log as defaultLog, type Logger } from './log.ts'
 import type { CallToolResult } from './mcp.ts'
+import { captureError } from './sentry.ts'
 
 export const text = (value: string): CallToolResult => ({ content: [{ type: 'text', text: value }] })
 
@@ -67,6 +68,7 @@ export function tool<Args extends unknown[]>(
 		} catch (error) {
 			logger.error('tool failed', { tool: name, message: messageOf(error) })
 			logger.debug('tool failed', { tool: name, stack: error instanceof Error ? error.stack : undefined })
+			captureError(error, name ? { 'mcp.tool': name } : undefined)
 
 			return failure(error)
 		}

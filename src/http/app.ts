@@ -19,6 +19,7 @@ import {
 import { log as defaultLog, type Logger } from '#kit/log'
 import type { AuthInfo, McpServer } from '#kit/mcp'
 import { messageOf } from '#kit/results'
+import { captureError } from '#kit/sentry'
 
 import type { HttpConfig } from './config.ts'
 import { apiError, errorPage } from './json.ts'
@@ -236,6 +237,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			const { pathname } = new URL(request.url)
 
 			logger.error('request failed', { path: pathname, message: messageOf(error) })
+			captureError(error, { 'http.path': pathname })
 
 			if (pathname === '/mcp') response = Response.json(INTERNAL_ERROR, { status: 500 })
 			else if (publicDir && wantsPage(request)) {
@@ -268,6 +270,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			.then((response) => send(res, response))
 			.catch((error) => {
 				logger.error('response failed', { message: messageOf(error) })
+				captureError(error)
 
 				if (!res.headersSent) res.writeHead(500)
 
@@ -330,6 +333,7 @@ async function respondMcp(
 				)
 			} catch (error) {
 				logger.error('mcp request failed', { message: messageOf(error) })
+				captureError(error, { 'http.path': '/mcp' })
 				write(INTERNAL_ERROR)
 			} finally {
 				await server.close()

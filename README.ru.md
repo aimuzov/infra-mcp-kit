@@ -27,7 +27,7 @@
 - [**Страницы**](#страницы): Astro-интеграция `mcpPages()` с лендингом, входом, страницами ошибки и 404 в стиле «Сигнал».
 - [**Тесты**](#тесты): клиенты в памяти и по HTTP и весь OAuth-поток для `node --test`.
 - [**Actions**](#actions) `check` и `publish` для workflow серверов.
-- [**Переезд с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
+- [**Переезд на infra-site-kit 5**](#переезд-на-infra-site-kit-5), [**с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
 
 ## Установка
 
@@ -111,7 +111,7 @@ await serveHttp({
 Вход — это статическая страница и хук `complete({ request, query, form })`, который говорит, кто вернулся:
 
 - `telegramLogin({ botToken })` проверяет подпись виджета Telegram, вход старше 10 минут или повторный отклоняется. `devUserId` включает `?dev=1` на loopback.
-- `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом.
+- `tokenFormLogin({ fields, verify })` принимает форму POST-запросом. `verify` возвращает `{ subject, claims }`, и claims доходят до `createServer` в `auth.extra`. `LoginError` возвращает человека на форму со своим текстом. `hide` убирает поля, которые сервер знает сам, см. [Форма входа по токену](#форма-входа-по-токену).
 
 Контекст входа — подписанный запрос, клиент и ошибка прошлой попытки — едет во фрагменте адреса и не попадает ни в логи сервера, ни в прокси. Фрагмент в ссылке подставит кто угодно, поэтому то, что решает, кому человек доверится, страница берёт с сервера: `Login.pageData` она получает по `GET /authorize/page`.
 
@@ -184,19 +184,124 @@ export default defineConfig({
 - `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm`, `/login/telegram` с `telegram: { grants }` и вход в кабинет `/account/signin` с `telegram: { account: true }`. Имя бота приходит с сервера в рантайме. `telegram.botName` — запасное только для `/login/telegram`, если сервер его не прислал: `/account/signin` берёт бота лишь из `/account/auth`, поэтому `telegramAccount` без `botName` не соберётся, если это не dev-вход. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
-- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.8.1`, см. [ниже](#переезд-на-infra-site-kit-5).
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
+### Форма входа по токену
+
+Форма описывается один раз, в модуле, который берут и `astro.config.mjs`, и сервер, поэтому страница и `tokenFormLogin` не разъезжаются:
+
+```ts
+// src/login-form.ts
+import { defineTokenForm } from '@aimuzov/infra-mcp-kit/astro'
+
+export const loginForm = defineTokenForm({
+	title: { ru: 'Подключение example', en: 'Connecting example' },
+	fields: [
+		{ name: 'url', label: { ru: 'Адрес', en: 'Address' }, type: 'url', placeholder: 'https://example.com' },
+		{ name: 'token', label: { ru: 'API-токен', en: 'API token' }, type: 'password' },
+	],
+})
+```
+
+```js
+// astro.config.mjs
+import { loginForm } from './src/login-form.ts'
+
+mcpPages({ service, tokenForm: loginForm })
+```
+
+```ts
+// src/http.ts
+tokenFormLogin({
+	fields: loginForm.fields,
+	// Адрес пришёл из env: страница прячет поле, сервер его не спрашивает и не читает.
+	hide: process.env.EXAMPLE_URL ? ['url'] : [],
+	verify,
+})
+```
+
+- Страница собрана до того, как сервер узнал свой env, поэтому `hide` работает в рантайме: список едет во фрагменте адреса (`hide=url`), остров убирает эти поля после гидрации, а `verify` не получает их значений, даже если кто-то их прислал. Имя, которого нет в форме, не даёт серверу стартовать, как и скрытое имя с чем-то кроме латиницы, цифр, `_`, `-` и `.`: запятая разрезала бы список.
+- Тексты принимают строку или `{ ru, en }`. Перевод в `service.strings` по ключам из раздела [Языки](#языки) по-прежнему сильнее, так что конфиг со строками работает как раньше. Ошибку «Заполни поле» сервер пишет с теми же подписями.
+- `defineTokenForm`, `mcpPages` и `tokenFormLogin` не пускают повтор имени поля и имя `request`: в нём едет подписанный запрос входа.
+- `defineTokenForm` и типы `TokenForm` и `TokenFormField` есть и в `/astro`, и в `/http`. Общий модуль берёт их из `/astro`: этот вход не тянет ни Astro, ни сервер, так что лёгок и в конфиге, и в рантайме.
+- `loginStep` из `/testing` отдаёт скрытые поля в `step.hide`.
+
 ### Языки
 
-С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
+С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется меню языков из infra-site-kit, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
 
-Английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
+Форма входа по токену может держать тексты как `{ ru, en }` прямо в конфиге, см. [Форма входа по токену](#форма-входа-по-токену). В остальном английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
 
 Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
-При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Переключатель запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Меню запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+
+### Переезд на infra-site-kit 5
+
+Страницы проверены на infra-site-kit 5.8.1, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
+```
+
+- 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
+- 5.1 превращает переключатель языка в меню: `details.lang` со ссылкой на каждый язык вместо ссылки `a.lang` на другой. Тест сервера, который кликал `a.lang`, сначала открывает меню: `page.locator('details.lang summary').click()`, потом `page.getByRole('link', { name: /English/ })`.
+- Сервер на 4.2 продолжает работать: кит не берёт ничего, чего нет в 4.2, просто в шапке остаётся старая ссылка.
+
+### Лендинг
+
+Карточка сервиса встаёт на лендинг через `landing.cards`, своя `index` для этого не нужна:
+
+```js
+mcpPages({
+	service,
+	landing: {
+		cards: [
+			{
+				id: 'account',
+				after: 'hero',
+				title: 'Сначала кабинет',
+				text: 'Войди и загрузи корпус, потом подключай.',
+				links: [{ href: '/account', label: 'Открыть кабинет', primary: true }],
+			},
+			{
+				id: 'help',
+				title: { ru: 'Помощь', en: 'Help' },
+				links: [{ href: 'https://example.com/docs', label: { ru: 'Документация', en: 'Docs' } }],
+			},
+		],
+	},
+})
+```
+
+- `after` ставит карточку после героя, после «Подключить» или, по умолчанию, в конец, после инструментов.
+- Текст -- строка или `{ ru, en }`. Перевод в `service.strings` по ключу `card.<id>.title`, `card.<id>.text` или `card.<id>.link.<i>` сильнее него.
+- `href` -- путь страницы без языка (на английской странице `/account` станет `/en/account`), `#якорь`, `https://` или `mailto:`. Внешняя ссылка открывается в новой вкладке и получает стрелку. Файл вроде `/llms.txt` остаётся как есть. Остальное роняет сборку. Её роняют и повтор `id`, и пустой заголовок или подпись ссылки на любом из собираемых языков: из `locales`, а без них на `ru`.
+- `primary` делает ссылку главной кнопкой, остальные -- обведённые.
+
+Когда карточки мало, например нужен остров со статусом, сервис перекрывает `index` и строит её на лендинге кита со слотами: `after-hero`, `after-connect` и слот по умолчанию в конце. Карточки конфига остаются на местах, а `LandingCard` рисует карточку того же вида со своей разметкой внутри:
+
+```astro
+---
+// src/frontend/pages/[...lang]/index.astro, с override: ['index']
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Landing from '@aimuzov/infra-mcp-kit/astro/landing.astro'
+import { localePaths } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+import CorpusStatus from '#frontend/components/corpus-status.svelte'
+
+export const getStaticPaths = localePaths
+---
+
+<Landing>
+	<CorpusStatus slot="after-hero" client:load />
+	<LandingCard slot="after-connect" id="faq" title="Вопросы">
+		<p class="muted">Своя разметка между заголовком и ссылками.</p>
+	</LandingCard>
+</Landing>
+```
 
 ## Тесты
 
@@ -253,15 +358,15 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 
 - `coverage-lines: 95` валит проверку при покрытии строк ниже 95%. Скрипт `test` должен начинаться с `node`: флаги покрытия action ставит сразу за ним, потому что ни в `NODE_OPTIONS`, ни после глоба тестов Node их не принимает. Тесты, `*.e2e.ts` и хелперы из `testing/` в счёт не идут.
 - `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
-- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
+- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright. Библиотеки Chromium в образе раннера уже есть, поэтому apt запускается, только если браузер без них не стартует, с лимитом по времени и тремя попытками. `--with-deps` тянул из apt шрифты, и медленное зеркало растягивало это до таймаута джобы. Сервер, который ставит Playwright своими шагами после action, по-прежнему запускает `npx playwright install --with-deps chromium` и упирается в тот же apt: эти шаги нужно заменить на `ui: true`, оставив только `upload-artifact` для снимков.
 
-Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
+Страницам нужен infra-site-kit 4.2.0 или новее, с `i18n.js` и переключателем языка. `mcpPages()` проверяет установленный и останавливает `astro check`, `astro build` и `astro dev` с версией, которую надо поставить, раньше, чем Vite упадёт на `exports`. Неразборчивую версию, как у форка или локальной копии, он только отмечает предупреждением. Peer-зависимостью он не объявлен: stdio-серверы без страниц держат site-kit ради конфигов Prettier и oxlint, и старый не должен ронять им `npm install`.
 
 ## Переезд с 2.x
 
 3.0 работает на [tmcp](https://github.com/paoloricciuti/tmcp) вместо официального SDK и на `node:http` вместо express. Рантайм размещённого сервера худеет с 27 МБ в 98 пакетах до 12 МБ в 15, из них 8 МБ — zod. Выданные токены и `auth.db` остаются как есть: переподключаться никому не придётся.
 
-1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4. SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
+1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4, переведи infra-site-kit на `#v5.8.1`, как [выше](#переезд-на-infra-site-kit-5). SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
 2. Импорты: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` и другие типы результатов берутся из `@aimuzov/infra-mcp-kit`. У `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` и `server.server.elicitInput()` сигнатуры SDK.
 3. Исключение в обработчике — результат с `isError`, как у `tool()`; в списке инструментов схема входа та же, что у SDK.
 4. `createHttpApp` отдаёт `{ handle, listener, context }`: `handle(request)` принимает `Request` и отдаёт `Response`, `listener` идёт в `node:http`. `startHttp` принимает само приложение, `.app` больше нет.

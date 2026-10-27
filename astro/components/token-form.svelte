@@ -21,6 +21,10 @@
 	$effect(() => {
 		context = readLoginContext()
 	})
+
+	// Страница собрана заранее, а что спрашивать, сервер решает в рантайме: лишнее он
+	// перечисляет во фрагменте, и после гидрации этих полей нет.
+	const shown = $derived(fields.filter((field) => !context?.hide.includes(field.name)))
 </script>
 
 <div class="auth">
@@ -44,7 +48,7 @@
 			<!-- Запрос едет скрытым полем POST-формы, а не в query: в логи прокси он не попадёт. -->
 			<form class="form" method="post" action={context?.callback}>
 				<input type="hidden" name="request" value={context?.request ?? ''} />
-				{#each fields as field (field.name)}
+				{#each shown as field (field.name)}
 					<Field label={field.label} for={`field-${field.name}`} hint={field.hint} {locale}>
 						<Input
 							id={`field-${field.name}`}

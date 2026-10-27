@@ -1,4 +1,4 @@
-import { toLocale, withKitStrings } from '@aimuzov/infra-mcp-kit/i18n'
+import { pick, toLocale, withKitStrings, type Localized } from '@aimuzov/infra-mcp-kit/i18n'
 import { t } from '@aimuzov/infra-site-kit/i18n.js'
 import config from 'virtual:infra-mcp-kit/pages'
 
@@ -11,12 +11,12 @@ export function pt(locale: string, key: string, vars?: Record<string, string | n
 
 /**
  * Поле конфига mcpPages на языке страницы: перевод из `service.strings` по ключу или само
- * поле, как оно записано в конфиге.
+ * поле, как оно записано в конфиге, строкой или по языкам `{ ru, en }`.
  */
-export function own(locale: string, key: string, value: string): string
-export function own(locale: string, key: string, value: string | undefined): string | undefined
-export function own(locale: string, key: string, value: string | undefined): string | undefined {
-	return config.service.strings?.[toLocale(locale)]?.[key] ?? value
+export function own(locale: string, key: string, value: Localized): string
+export function own(locale: string, key: string, value: Localized | undefined): string | undefined
+export function own(locale: string, key: string, value: Localized | undefined): string | undefined {
+	return config.service.strings?.[toLocale(locale)]?.[key] ?? pick(value, locale)
 }
 
 /**

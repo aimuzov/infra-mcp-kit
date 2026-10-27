@@ -28,6 +28,7 @@ import {
 	type RunningHttp,
 } from '#kit/testing/index'
 
+import { loginForm } from './connector/src/login-form.ts'
 import { buildPages } from './pages.ts'
 
 const SHOTS = fileURLToPath(new URL('../test-results/screens', import.meta.url))
@@ -35,12 +36,16 @@ const CLIENT_REDIRECT = 'http://127.0.0.1:9/cb'
 
 let http: RunningHttp
 let browser: Browser
+let publicDir: string
 const problems: string[] = []
 
-before(async () => {
-	const publicDir = buildPages()
-
-	http = await startHttp((base) =>
+/**
+ * Коннектор-фикстура на собранных страницах. Поля формы -- из того же модуля, что берёт
+ * `astro.config.mjs`. Основной экземпляр прячет адрес пространства, как сервер, которому
+ * его задали в env.
+ */
+function connector(hide: string[]) {
+	return startHttp((base) =>
 		createHttpApp({
 			config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
 			service: { name: 'fixture' },
@@ -49,7 +54,8 @@ before(async () => {
 				store: memoryStore(),
 				tokens: 'encrypt',
 				login: tokenFormLogin({
-					fields: [{ name: 'token', label: 'API-токен' }],
+					fields: loginForm.fields,
+					hide,
 					verify: ({ token }) => {
 						if (token !== 'good')
 							throw new LoginError({ ru: 'Токен не подошёл', en: 'The token did not fit' })
@@ -86,7 +92,11 @@ before(async () => {
 			],
 		}),
 	)
+}
 
+before(async () => {
+	publicDir = buildPages()
+	http = await connector(['space'])
 	browser = await chromium.launch()
 	mkdirSync(SHOTS, { recursive: true })
 })
@@ -97,8 +107,7 @@ after(async () => {
 })
 
 /** Клиент регистрируется и идёт в `/authorize`: адрес страницы входа с контекстом во фрагменте. */
-async function authorize(): Promise<{ url: string; step: LoginStep }> {
-	const base = http.base
+async function authorize(base = http.base): Promise<{ url: string; step: LoginStep }> {
 	const reg = await fetch(`${base}/register`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -125,6 +134,8 @@ async function authorize(): Promise<{ url: string; step: LoginStep }> {
 }
 
 type OpenOptions = { scheme?: 'light' | 'dark'; width?: number; cookie?: boolean }
+/** Экран для снимка: что сделать на странице перед ним, например открыть меню. */
+type ScreenOptions = OpenOptions & { prepare?: (page: Page) => Promise<void> }
 
 async function open(path: string, { scheme = 'light', width = 1280, cookie }: OpenOptions = {}) {
 	const context: BrowserContext = await browser.newContext({
@@ -194,6 +205,80 @@ describe('OAuth через статическую страницу входа', 
 
 		assert.match(request.url(), /code=/)
 		await context.close()
+	})
+})
+
+describe('форма входа из общего модуля', () => {
+	test('поле, которое сервер знает сам, есть в статике, но пропадает после гидрации и не нужно серверу', async () => {
+		const { url, step } = await authorize()
+
+		assert.deepEqual(step.hide, ['space'])
+		// Страница собрана со всеми полями: что спрашивать, сервер решает уже в рантайме.
+		assert.match(await (await fetch(new URL(step.page, http.base))).text(), /name="space"/)
+
+		const { page, context } = await open(url)
+
+		assert.equal(await page.locator('input[name=space]').count(), 0)
+		assert.equal(await page.locator('label[for=field-token]').innerText(), 'API-токен')
+		await page.fill('input[name=token]', 'good')
+
+		const [request] = await Promise.all([
+			page.waitForRequest((r) => r.url().startsWith(CLIENT_REDIRECT)),
+			page.click('button[type=submit]'),
+		])
+
+		assert.match(request.url(), /code=/)
+		await context.close()
+
+		// После ошибки поле тоже скрыто: `hide` едет во фрагменте и обратно на форму.
+		const refused = await submitForm({ token: 'bad' })(step)
+
+		assert.deepEqual(loginStep(refused.headers.get('location') ?? '', http.base).hide, ['space'])
+	})
+
+	test('без hide форма спрашивает все поля, подписи на языке страницы', async () => {
+		const full = await connector([])
+
+		try {
+			const { url, step } = await authorize(full.base)
+
+			assert.deepEqual(step.hide, [])
+
+			// Пустое обязательное поле браузер не отправит, а сервер всё равно проверяет сам.
+			const refused = await submitForm({ token: 'good' })(step)
+
+			assert.match(
+				loginStep(refused.headers.get('location') ?? '', full.base).error,
+				/Заполни поле «Адрес пространства»/,
+			)
+
+			const context = await browser.newContext({ locale: 'en-US' })
+			const page = await context.newPage()
+
+			await page.goto(url)
+			await page.waitForURL(/\/en\/login/)
+			await page.locator('input[name=space]').waitFor()
+			assert.equal(await page.locator('label[for=field-space]').innerText(), 'Space address')
+			assert.equal(await page.locator('label[for=field-token]').innerText(), 'API token')
+
+			assert.equal(
+				await page.locator('input[name=space]').getAttribute('placeholder'),
+				'https://space.example.com',
+			)
+
+			await page.fill('input[name=space]', 'https://space.example.com')
+			await page.fill('input[name=token]', 'good')
+
+			const [request] = await Promise.all([
+				page.waitForRequest((r) => r.url().startsWith(CLIENT_REDIRECT)),
+				page.click('button[type=submit]'),
+			])
+
+			assert.match(request.url(), /code=/)
+			await context.close()
+		} finally {
+			await full.close()
+		}
 	})
 })
 
@@ -396,10 +481,53 @@ describe('языки', () => {
 		await context.close()
 	})
 
+	test('меню языков из site-kit 5: оформлено "Сигналом", закрывается по Esc и клику мимо', async () => {
+		const { page, context } = await open('/')
+		const menu = page.locator('header details.lang')
+		const summary = menu.locator('summary')
+
+		// С site-kit 5.1 переключатель -- меню на `<details>`, а не ссылка на другой язык.
+		assert.equal(await page.locator('header a.lang').count(), 0)
+		assert.equal(await summary.getAttribute('aria-label'), 'Язык: Русский')
+		assert.equal((await summary.innerText()).trim(), 'RU')
+
+		// Кнопки шапки одной высоты, подпись меню -- моноширинным шрифтом "Сигнала".
+		const look = await summary.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			theme: document.querySelector('.theme')?.getBoundingClientRect().height,
+			font: getComputedStyle(node).fontFamily,
+		}))
+
+		assert.equal(look.height, look.theme)
+		assert.match(look.font, /mono/i)
+
+		await summary.click()
+		assert.equal(await menu.getAttribute('open'), '')
+
+		assert.deepEqual(
+			await menu
+				.locator('.lang__option')
+				.evaluateAll((els) => els.map((el) => [el.getAttribute('hreflang'), el.getAttribute('aria-current')])),
+			[
+				['ru', 'true'],
+				['en', null],
+			],
+		)
+
+		await page.keyboard.press('Escape')
+		assert.equal(await menu.getAttribute('open'), null)
+
+		await summary.click()
+		await page.locator('main').click({ position: { x: 5, y: 5 } })
+		assert.equal(await menu.getAttribute('open'), null)
+		await context.close()
+	})
+
 	test('переключатель ведёт на ту же страницу и запоминает выбор', async () => {
 		const { page, context } = await open('/account')
 
-		await page.locator('a.lang').click()
+		await page.locator('details.lang summary').click()
+		await page.getByRole('link', { name: /English/ }).click()
 		await page.waitForURL(/\/en\/account$/)
 		// Экран входа рисует остров после запроса состояния, его и ждём.
 		await page.getByRole('heading', { name: 'Sign in first' }).waitFor()
@@ -407,8 +535,10 @@ describe('языки', () => {
 		// Выбор в cookie сильнее Accept-Language: русская ссылка теперь ведёт на английскую.
 		await page.goto(new URL('/login', http.base).href)
 		assert.equal(new URL(page.url()).pathname, '/en/login')
+		assert.equal(await page.locator('details.lang summary').getAttribute('aria-label'), 'Language: English')
 
-		await page.locator('a.lang').click()
+		await page.locator('details.lang summary').click()
+		await page.getByRole('link', { name: /Русский/ }).click()
 		await page.waitForURL(/\/login$/)
 		assert.equal(await page.locator('html').getAttribute('lang'), 'ru')
 		await context.close()
@@ -463,9 +593,10 @@ describe('языки', () => {
 
 		await page.goto(url)
 		await page.locator('input[name="token"]').fill('bad')
-		await page.locator('button[type="submit"]').click()
-		await page.waitForURL(/\/en\/login/)
-		assert.match(await page.locator('main').innerText(), /The token did not fit/)
+		// Ждём адрес с ошибкой: `/en/login` был и до отправки, текст читался бы со старой.
+		await Promise.all([page.waitForURL(/\/en\/login#.*error=/), page.locator('button[type="submit"]').click()])
+		await page.waitForSelector('[role=alert]')
+		assert.match(await page.locator('[role=alert]').innerText(), /The token did not fit/)
 		await context.close()
 	})
 
@@ -477,13 +608,122 @@ describe('языки', () => {
 	})
 })
 
+describe('лендинг', () => {
+	/** Что стоит в `main` лендинга по порядку: карточки по `data-card`, остальное по заголовку. */
+	async function order(page: Page): Promise<string[]> {
+		return page
+			.locator('main > *')
+			.evaluateAll((els) =>
+				els.map(
+					(el) =>
+						el.getAttribute('data-card') ??
+						el.getAttribute('data-slot') ??
+						(el.matches('.hero') ? 'hero' : (el.querySelector('h2')?.textContent ?? el.tagName)),
+				),
+			)
+	}
+
+	test('карточки из конфига встают после героя и в конце, ссылки -- кнопки', async () => {
+		const { page, context } = await open('/')
+
+		assert.deepEqual(await order(page), ['hero', 'account', 'Подключить', 'Инструменты', 'help'])
+
+		const account = page.locator('[data-card="account"]')
+
+		assert.match((await account.textContent()) ?? '', /Сначала кабинет[\s\S]*Войди и загрузи корпус/)
+
+		const enter = account.getByRole('link', { name: 'Открыть кабинет' })
+
+		assert.equal(await enter.getAttribute('href'), '/account')
+		assert.equal(await enter.getAttribute('target'), null)
+
+		// Главная ссылка -- залитая кнопка с расслоением, остальные обведены.
+		const look = await enter.evaluate((node) => {
+			const css = getComputedStyle(node)
+
+			return {
+				underline: css.textDecorationLine,
+				shadow: css.boxShadow,
+				height: node.getBoundingClientRect().height,
+			}
+		})
+
+		assert.equal(look.underline, 'none')
+		assert.match(look.shadow, /rgb\(241, 31, 36\).*rgb\(95, 232, 176\)/)
+		assert.equal(look.height, 40)
+
+		const readme = page.locator('[data-card="help"]').getByRole('link', { name: 'README' })
+
+		assert.deepEqual(
+			[await readme.getAttribute('target'), await readme.getAttribute('rel')],
+			['_blank', 'noopener'],
+		)
+
+		assert.equal(await readme.locator('svg').count(), 1)
+
+		assert.equal(
+			await page.locator('[data-card="help"]').getByRole('link', { name: 'Написать' }).getAttribute('href'),
+			'mailto:help@example.com',
+		)
+
+		await enter.click()
+		await page.waitForURL(/\/account$/)
+		await context.close()
+	})
+
+	test('английский лендинг: тексты по ключам и по языкам, путь ссылки с языком', async () => {
+		const { page, context } = await open('/en/')
+		const account = page.locator('[data-card="account"]')
+
+		assert.match((await account.textContent()) ?? '', /Account first[\s\S]*Sign in and upload the corpus/)
+		assert.equal(await account.getByRole('link', { name: 'Open the account' }).getAttribute('href'), '/en/account')
+		assert.match((await page.locator('[data-card="help"]').textContent()) ?? '', /Help[\s\S]*Write to us/)
+		await context.close()
+	})
+
+	test('свой лендинг на разметке кита: слоты после героя, после "Подключить" и в конце', async () => {
+		const { page, context } = await open('/landing')
+
+		assert.deepEqual(await order(page), [
+			'hero',
+			'account',
+			'status',
+			'Подключить',
+			'faq',
+			'Инструменты',
+			'help',
+			'end',
+		])
+
+		// Своя разметка в слоте карточки встаёт между заголовком и ссылками.
+		assert.equal(await page.locator('[data-card="faq"] .grants li').count(), 1)
+		await context.close()
+
+		const en = await open('/en/landing')
+
+		assert.match((await en.page.locator('[data-card="status"]').textContent()) ?? '', /Corpus status/)
+		assert.match((await en.page.locator('[data-slot="end"]').textContent()) ?? '', /The last slot/)
+		await en.context.close()
+	})
+})
+
 describe('скриншоты', () => {
 	test('все экраны в обеих темах на телефоне и десктопе, без нарушений CSP и ошибок JS', async () => {
 		const { url: login } = await authorize()
 		const loginError = `${login}&error=${encodeURIComponent('Токен не подошёл')}`
 		const telegram = `/login/telegram#request=r&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&dev=42`
-		const screens: Record<string, [string, OpenOptions?]> = {
+		const langMenu: ScreenOptions = {
+			prepare: async (page) => {
+				const menu = page.locator('details.lang')
+
+				await menu.locator('summary').click()
+				// Иначе снимок ловит шеврон посреди поворота, а рамку -- посреди перекраски.
+				await menu.evaluate((node) => Promise.all(node.getAnimations({ subtree: true }).map((a) => a.finished)))
+			},
+		}
+		const screens: Record<string, [string, ScreenOptions?]> = {
 			landing: ['/'],
+			'lang-menu': ['/', langMenu],
 			login: [login],
 			'login-error': [loginError],
 			telegram: [telegram],
@@ -493,6 +733,7 @@ describe('скриншоты', () => {
 			account: ['/account', { cookie: true }],
 			'account-signin': ['/account/signin'],
 			'en.landing': ['/en/'],
+			'en.lang-menu': ['/en/', langMenu],
 			'en.login': [login.replace('/login', '/en/login')],
 			'en.telegram': [`/en${telegram}`],
 			'en.error': [
@@ -502,9 +743,11 @@ describe('скриншоты', () => {
 			'en.account-guest': ['/en/account'],
 			'en.account': ['/en/account', { cookie: true }],
 			'en.account-signin': ['/en/account/signin'],
+			'landing-slots': ['/landing'],
+			'en.landing-slots': ['/en/landing'],
 		}
 
-		for (const [name, [path, options]] of Object.entries(screens)) {
+		for (const [name, [path, { prepare, ...options } = {}]] of Object.entries(screens)) {
 			for (const scheme of ['light', 'dark'] as const) {
 				for (const [label, width] of [
 					['desktop', 1280],
@@ -512,6 +755,7 @@ describe('скриншоты', () => {
 				] as const) {
 					const { page, context } = await open(path, { ...options, scheme, width })
 
+					await prepare?.(page)
 					await page.screenshot({ path: join(SHOTS, `${name}.${scheme}.${label}.png`), fullPage: true })
 					await context.close()
 				}

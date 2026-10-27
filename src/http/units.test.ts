@@ -132,6 +132,7 @@ test('контекст входа из фрагмента и колбэк с з�
 		host: 'claude.ai',
 		error: '',
 		dev: '7',
+		hide: [],
 	})
 
 	assert.equal(callbackUrl(context, 'https://a.b').href, 'https://a.b/authorize/callback?request=r.1')

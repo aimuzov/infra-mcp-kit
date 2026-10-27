@@ -3,6 +3,7 @@ import { hostname } from 'node:os'
 import type { BaseTransportOptions, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
+import { scrub, scrubBreadcrumb, scrubEvent } from './scrub.ts'
 
 type Tags = Record<string, string>
 type Core = typeof import('@sentry/core')
@@ -19,6 +20,7 @@ type ForeignScope = {
 	clone(): ForeignScope
 	setTags(tags: Tags): unknown
 	captureException(error: unknown): unknown
+	addEventProcessor(processor: <T extends object>(event: T) => T): unknown
 	getClient(): ForeignClient | undefined
 }
 type ForeignClient = {
@@ -84,6 +86,11 @@ export async function initSentry({ name, version, env = process.env, transport }
 			queues: false,
 			stackFrameVariables: false,
 		},
+		// Текст ошибок пишет апстрим, и `dataCollection` его не касается: секреты из него
+		// вычищает `scrubEvent`.
+		beforeSend: scrubEvent,
+		beforeSendTransaction: scrubEvent,
+		beforeBreadcrumb: scrubBreadcrumb,
 		integrations: [
 			sentry.eventFiltersIntegration(),
 			sentry.functionToStringIntegration(),
@@ -130,6 +137,9 @@ function foreignReporter(): Reporter | undefined {
 				const scope = current()!.clone()
 
 				scope.setTags(tags)
+				// `beforeSend` чужого клиента кит не ставит, поэтому чистит свои события процессором
+				// на копии scope: остальные события сервера он не трогает.
+				scope.addEventProcessor(scrubEvent)
 				scope.captureException(error)
 			},
 			flush: (timeout) => client.flush(timeout),
@@ -180,7 +190,7 @@ async function fatal(error: unknown) {
 	send(error instanceof Error ? copyOf(error) : error, { fatal: 'true' })
 	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
 	await flushSentry().catch(() => {})
-	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
+	process.stderr.write(`${scrub(error instanceof Error ? (error.stack ?? String(error)) : String(error))}\n`)
 	process.exit(1)
 }
 
@@ -198,6 +208,39 @@ export function captureError(error: unknown, tags?: Tags): void {
 
 function send(error: unknown, tags?: Tags) {
 	reporter?.capture(safe(error), { ...tagged.getStore(), ...tags })
+}
+
+/**
+ * Ошибка для Sentry без текста: тип, код и стек исходной. Так кит отправляет ошибку входа:
+ * её текст пишет апстрим, и в нём бывает то, что человек ввёл в форму, или ответ сервиса
+ * с его токеном. Код -- `code` из Node и undici вроде `ECONNREFUSED` или HTTP-статус.
+ */
+export function withoutMessage(error: unknown): Error {
+	const name = error instanceof Error && /^[\w$.]{1,60}$/.test(error.name) ? error.name : 'Error'
+	const code = codeOf(error) ?? codeOf((error as { cause?: unknown } | null)?.cause)
+	const copy = new Error(code === undefined ? '' : String(code))
+	// Только строки кадров: в первых строках стека тот же текст ошибки.
+	const frames = (error instanceof Error ? (error.stack ?? '') : '')
+		.split('\n')
+		.filter((line) => /^\s+at /.test(line))
+
+	copy.name = name
+	copy.stack = [String(copy), ...frames].join('\n')
+
+	return copy
+}
+
+function codeOf(error: unknown): string | number | undefined {
+	if (error === null || typeof error !== 'object') return undefined
+
+	const { code, status, statusCode } = error as Record<string, unknown>
+
+	if (typeof code === 'string' && /^[A-Z][A-Z\d_]{1,40}$/.test(code)) return code
+
+	for (const value of [code, status, statusCode])
+		if (Number.isInteger(value) && (value as number) >= 100 && (value as number) < 600) return value as number
+
+	return undefined
 }
 
 const replaced = new WeakMap<object, Error>()

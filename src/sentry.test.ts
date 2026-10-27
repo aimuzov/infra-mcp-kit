@@ -3,24 +3,43 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { beforeEach, describe, test } from 'node:test'
+import { after, beforeEach, describe, test } from 'node:test'
 import { z } from 'zod'
 
-import { createHttpApp } from '#kit/http/app'
+import { telegramAccount } from '#kit/http/account/telegram'
+import { createHttpApp, type Route } from '#kit/http/app'
+import { telegramLogin } from '#kit/http/login/telegram'
+import { tokenFormLogin } from '#kit/http/login/token-form'
+import type { Login } from '#kit/http/oauth/provider'
+import { memoryStore } from '#kit/http/oauth/store'
+import {
+	accountLogin,
+	fakePages,
+	oauthFlow,
+	startHttp,
+	submitForm,
+	telegramSigned,
+	type RunningHttp,
+} from '#kit/testing/index'
 
+import { createLogger, type Logger } from './log.ts'
 import { McpServer } from './mcp.ts'
 import { tool } from './results.ts'
-import { captureError, flushSentry, initSentry } from './sentry.ts'
+import { captureError, flushSentry, initSentry, withoutMessage } from './sentry.ts'
 
 const quiet = { error() {}, warn() {}, info() {}, debug() {} }
 const SECRET_ARG = 'card 4276-0000-1111-2222'
 const SECRET_QUERY = 'token=abc'
+// Подложенные секреты: API-токен в виде UUID, JWT и токен бота Telegram.
+const PLANTED = 'e3b0c442-98fc-4c14-9afb-f4c8996fb924'
+const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJrYWl0ZW4ifQ.Kq2rCmgVTpD0pXMjWj1EDx1vJmLy3tqB0V4i3x9P0nE'
+const BOT_TOKEN = '7012345678:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw2'
 
 type Event = {
 	release?: string
 	environment?: string
 	tags?: Record<string, string>
-	exception?: { values: Array<{ value?: string }> }
+	exception?: { values: Array<{ type?: string; value?: string }> }
 }
 
 // Конверт Sentry -- `[заголовки, [[заголовок, тело], ...]]`. Сырое тело тоже храним:
@@ -67,6 +86,12 @@ function server() {
 		),
 	)
 
+	mcp.registerTool('leaky', { description: 'Throws with a token' }, async () => {
+		throw new Error(
+			`Kaiten 401: GET https://kaiten.example/api/cards?token=${PLANTED} with Authorization: Bearer ${JWT}`,
+		)
+	})
+
 	mcp.registerPrompt('broken', { description: 'Throws' }, () => {
 		throw new Error('prompt failed')
 	})
@@ -81,6 +106,46 @@ const call = (mcp: McpServer, name: string) =>
 		method: 'tools/call',
 		params: { name, arguments: { note: SECRET_ARG } },
 	}) as Promise<{ result: { isError?: boolean; content: Array<{ text: string }> } }>
+
+const running: RunningHttp[] = []
+
+after(() => Promise.all(running.map((http) => http.close())))
+
+/** Коннектор со входом или своими маршрутами, со страницами-заглушками. */
+async function startApp({ login, routes, logger = quiet }: { login?: Login; routes?: Route[]; logger?: Logger }) {
+	const http = await startHttp((base) =>
+		createHttpApp({
+			config: { port: 0, publicUrl: new URL(base), authSecret: 'x'.repeat(32), allowedRedirectUris: [] },
+			service: { name: 'test' },
+			createServer: () => server(),
+			logger,
+			publicDir: fakePages(),
+			...(login && { auth: { store: memoryStore(), login, tokens: 'encrypt' as const } }),
+			...(routes && { routes }),
+		}),
+	)
+
+	running.push(http)
+
+	return http.base
+}
+
+test('withoutMessage: тип, код и кадры стека без текста', () => {
+	const upstream = Object.assign(new TypeError(`fetch failed for ${PLANTED}`), {
+		cause: Object.assign(new Error(`connect ${PLANTED}`), { code: 'ECONNREFUSED' }),
+	})
+	const bare = withoutMessage(upstream)
+
+	assert.equal(bare.name, 'TypeError')
+	assert.equal(bare.message, 'ECONNREFUSED')
+	assert.equal(bare.cause, undefined)
+	assert.ok(!bare.stack?.includes(PLANTED))
+	assert.match(bare.stack ?? '', /^TypeError: ECONNREFUSED\n\s+at /)
+
+	assert.equal(withoutMessage(Object.assign(new Error('x'), { status: 401 })).message, '401')
+	assert.equal(withoutMessage(Object.assign(new Error('x'), { code: `token ${PLANTED}` })).message, '')
+	assert.equal(withoutMessage('строка').name, 'Error')
+})
 
 describe('sentry', () => {
 	beforeEach(() => {
@@ -206,6 +271,104 @@ describe('sentry', () => {
 		assert.ok(!sent[0]!.raw.includes(SECRET_ARG))
 	})
 
+	test('ошибка инструмента уходит без подложенного токена, а модель видит текст целиком', async () => {
+		const response = await call(server(), 'leaky')
+
+		assert.equal(response.result.isError, true)
+		assert.match(response.result.content[0]?.text ?? '', new RegExp(PLANTED))
+
+		const [event, ...rest] = await events()
+
+		assert.equal(rest.length, 0)
+		assert.equal(event?.tags?.['mcp.tool'], 'leaky')
+
+		assert.equal(
+			event?.exception?.values[0]?.value,
+			'Kaiten 401: GET https://kaiten.example/api/cards?token=[Filtered] with Authorization: [Filtered]',
+		)
+
+		assert.ok(!sent[0]!.raw.includes(PLANTED) && !sent[0]!.raw.includes(JWT))
+	})
+
+	test('ошибка входа по токену уходит только типом и кодом, лог без токена', async () => {
+		const lines: string[] = []
+		const login = tokenFormLogin({
+			fields: [{ name: 'token', label: 'API-токен' }],
+			verify: ({ token }) => {
+				throw Object.assign(new TypeError(`GET https://kaiten.example/api?token=${token}: Bearer ${token}`), {
+					cause: Object.assign(new Error(`connect ${token}`), { code: 'ECONNREFUSED' }),
+				})
+			},
+		})
+		const base = await startApp({ login, logger: createLogger({ write: (line) => lines.push(line) }) })
+
+		await assert.rejects(oauthFlow({ base, login: submitForm({ token: PLANTED }) }), /303/)
+
+		const [event, ...rest] = await events()
+
+		assert.equal(rest.length, 0)
+		assert.equal(event?.tags?.['http.path'], '/authorize/callback')
+
+		assert.deepEqual(
+			event?.exception?.values.map(({ type, value }) => ({ type, value })),
+			[{ type: 'TypeError', value: 'ECONNREFUSED' }],
+		)
+
+		assert.ok(!sent[0]!.raw.includes(PLANTED))
+		assert.ok(!sent[0]!.raw.includes('kaiten.example'), 'текст апстрима не уходит даже очищенным')
+
+		const logged = lines.find((line) => line.includes('login failed'))
+
+		assert.ok(logged && !logged.includes(PLANTED), String(logged))
+	})
+
+	test('ошибка входа через Telegram уходит без текста и токена бота', async () => {
+		const login = telegramLogin({
+			botToken: BOT_TOKEN,
+			botName: 'test_bot',
+			claims: () => {
+				throw new Error(`profile lookup with ${BOT_TOKEN} failed`)
+			},
+		})
+		const base = await startApp({ login })
+
+		await assert.rejects(oauthFlow({ base, login: telegramSigned({ id: '42', first_name: 'A' }, BOT_TOKEN) }))
+
+		const [event, ...rest] = await events()
+
+		assert.equal(rest.length, 0)
+		assert.equal(event?.tags?.['http.path'], '/authorize/callback')
+		assert.equal(event?.exception?.values[0]?.type, 'Error')
+		assert.ok(!event?.exception?.values[0]?.value)
+		assert.ok(!sent[0]!.raw.includes(BOT_TOKEN) && !sent[0]!.raw.includes('profile lookup'))
+	})
+
+	test('ошибка входа в кабинет уходит без текста, человек видит страницу ошибки', async () => {
+		const account = telegramAccount({
+			botToken: BOT_TOKEN,
+			botName: 'test_bot',
+			claims: () => {
+				throw new Error(`session store rejected ${PLANTED}`)
+			},
+		})
+		const base = await startApp({ routes: [account] })
+		const { response, cookie } = await accountLogin(base, {
+			user: { id: '42', first_name: 'A' },
+			botToken: BOT_TOKEN,
+		})
+
+		assert.equal(response.status, 302)
+		assert.match(response.headers.get('location') ?? '', /\/error/)
+		assert.equal(cookie, '')
+
+		const [event, ...rest] = await events()
+
+		assert.equal(rest.length, 0)
+		assert.equal(event?.tags?.['http.path'], '/account/login')
+		assert.ok(!event?.exception?.values[0]?.value)
+		assert.ok(!sent[0]!.raw.includes(PLANTED))
+	})
+
 	// Сервер вроде kaiten-mcp зовёт `Sentry.init` из своего `@sentry/node` до `runCli`. Его ядро
 	// другой версии, и состояние SDK лежит под другим ключом `__SENTRY__`: так и эмулируем.
 	test('если сервер уже завёл Sentry, кит шлёт через его клиент и не заводит второй', async () => {
@@ -256,7 +419,7 @@ describe('sentry', () => {
 			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
 			const enabled = await kit.initSentry({ name: 'kit-test', version: '1.2.3', env: {} })
 
-			kit.withTags({ 'mcp.tool': 'pay' }, () => kit.captureError(new Error('via server')))
+			kit.withTags({ 'mcp.tool': 'pay' }, () => kit.captureError(new Error('via server, Bearer ${PLANTED}')))
 			await kit.flushSentry()
 			console.log(JSON.stringify({ enabled, events, listeners: process.listenerCount('uncaughtException') }))
 		`
@@ -283,7 +446,12 @@ describe('sentry', () => {
 		assert.equal(events.length, 1)
 		assert.equal(events[0]?.release, 'own@1.0.0')
 		assert.equal(events[0]?.tags?.['mcp.tool'], 'pay')
-		assert.equal(events[0]?.exception?.values[0]?.value, 'via server')
+
+		assert.equal(
+			events[0]?.exception?.values[0]?.value,
+			'via server, Bearer [Filtered]',
+			'кит чистит и через чужой клиент',
+		)
 	})
 
 	test('сломанная отправка не мешает упавшему процессу выйти с кодом 1', async () => {

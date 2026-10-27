@@ -67,10 +67,43 @@ Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. 
 
 - The release is `<name>@<version>` from `runCli`, so `name` should match the Sentry project. The environment is `production`, `SENTRY_ENVIRONMENT` changes it for a local check.
 - Sent: uncaught exceptions and rejections (the process still exits with 1, once the event is out), errors of tool, prompt and resource handlers, including the ones the client gets back as `isError`, tagged `mcp.tool`, `mcp.prompt` or `mcp.resource`, failed HTTP, `/mcp` and OAuth requests and sign-ins tagged `http.path`, and an error that stops `runCli`.
-- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, so user data has no place in error messages.
+- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, and the kit cleans secrets out of the message, [see below](#secrets-in-reports-and-logs). User data still has no place in error messages.
 - Errors only, no traces. The client is `@sentry/core` instead of `@sentry/node`: 13 MB instead of 80, no OpenTelemetry and no breadcrumbs from the console or outgoing requests.
 - A server that called `Sentry.init` itself before `runCli`, from any SDK version, gets no second client: the kit sends its errors through the server's client with the same tags and does not read `SENTRY_DSN`.
 - A server without `runCli` calls `await initSentry({ name, version })` itself. `captureError(error, tags)` sends an error the server caught on its own, `withTags(tags, run)` tags every error inside `run`.
+
+### Secrets in reports and logs
+
+An error message is written by whoever threw the error, most often the upstream. It can carry tokens and request URLs. Before sending, `scrubEvent` walks the exception messages, the message, `extra`, `contexts`, tags, the request, breadcrumbs and spans and replaces secrets with `[Filtered]`:
+
+- JWT and JWE (`eyJ...` with dots) and the value after `Bearer` or `Basic`.
+- UUIDs, hex of 32 characters and more, and long base64url strings with digits.
+- A Telegram bot token (`123456:AA...`), including inside a `/bot<token>/` URL.
+- Query and fragment values (`?token=`, `?code=`, `?state=`, `#access_token=`) and form body pairs. Parameter names stay.
+- Userinfo in a URL: `https://user:pass@host`.
+- Values of `Authorization` and `Cookie` headers in text and of keys like `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`.
+- In the event's request, the body and cookies as a whole, and `Authorization`, `Cookie`, `X-Api-Key` and similar headers.
+
+A sign-in error (OAuth callback, token form, Telegram, account sign-in) leaves with no message at all, only the type and a code: `ECONNREFUSED` or an HTTP status. Its message comes from the service the person has just handed a token to, and no set of rules can guess every token format. `withoutMessage(error)` gives the server the same copy of its own error.
+
+The kit's logger passes every line for stderr and `LOG_FILE` through `scrub(text)`, and `runCli` cleans the error line it stops on the same way. A custom `logger` given to `createHttpApp` or `tool` gets the text as is, so clean it with `scrub` yourself.
+
+A service adds rules for its own secrets once at startup, before `runCli`. They run before the built-in ones and apply both to Sentry and to the log:
+
+```ts
+import { addScrubRules } from '@aimuzov/infra-mcp-kit'
+
+addScrubRules(
+	// The service's own token format: every match becomes `[Filtered]`, the kit adds the `g` flag itself.
+	/kt_[A-Za-z0-9]{24}/,
+	// The exact secret value. An empty string is skipped.
+	process.env.UPSTREAM_TOKEN ?? '',
+	// A custom replacement: takes the text, returns it clean.
+	(text) => text.replace(/card \d+/g, 'card [id]'),
+)
+```
+
+If the server set up Sentry itself, the kit cleans only its own events, with a processor on a copy of the scope. For the rest, add `beforeSend: scrubEvent`, `beforeSendTransaction: scrubEvent` and `beforeBreadcrumb: scrubBreadcrumb` to your `Sentry.init`.
 
 ## HTTP and OAuth
 

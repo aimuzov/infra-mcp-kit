@@ -1,5 +1,7 @@
 import { appendFileSync } from 'node:fs'
 
+import { scrub } from './scrub.ts'
+
 /**
  * Лог только в stderr и, по желанию, в файл: stdout в stdio-режиме занят JSON-RPC,
  * и любая строка там ломает протокол.
@@ -27,7 +29,8 @@ export function createLogger({
 		if (ORDER[lvl] > ORDER[level]) return
 
 		const tail = meta === undefined ? '' : ` ${stringify(meta)}`
-		const line = `[${new Date().toISOString()}] ${lvl.toUpperCase()} ${message}${tail}\n`
+		// Сюда попадает текст ошибок апстрима, а лог читают дальше этого процесса.
+		const line = `[${new Date().toISOString()}] ${lvl.toUpperCase()} ${scrub(`${message}${tail}`)}\n`
 
 		write(line)
 

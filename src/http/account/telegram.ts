@@ -13,6 +13,8 @@ import {
 import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, hostCookie, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
+import { messageOf } from '#kit/results'
+import { captureError, withoutMessage } from '#kit/sentry'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
@@ -124,10 +126,19 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 			if (query.hash && !spendSignature(query.hash)) return fail('login.linkUsed')
 
-			const response = redirect(
-				localizePath(home, locale),
-				await session.cookie({ ...claimsOf(user), sub: user.id }),
-			)
+			let cookie: string
+
+			try {
+				cookie = await session.cookie({ ...claimsOf(user), sub: user.id })
+			} catch (error) {
+				// Как у OAuth-входа: claims собирает сервис, и в тексте его ошибки может быть что угодно.
+				context.logger.error('account login failed', { message: messageOf(error) })
+				captureError(withoutMessage(error), { 'http.path': url.pathname })
+
+				return fail('server.later')
+			}
+
+			const response = redirect(localizePath(home, locale), cookie)
 
 			response.headers.append('set-cookie', signinCookie('', 0))
 

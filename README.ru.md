@@ -145,6 +145,59 @@ export default defineConfig({
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
+### Лендинг
+
+Карточка сервиса встаёт на лендинг через `landing.cards`, своя `index` для этого не нужна:
+
+```js
+mcpPages({
+	service,
+	landing: {
+		cards: [
+			{
+				id: 'account',
+				after: 'hero',
+				title: 'Сначала кабинет',
+				text: 'Войди и загрузи корпус, потом подключай.',
+				links: [{ href: '/account', label: 'Открыть кабинет', primary: true }],
+			},
+			{
+				id: 'help',
+				title: { ru: 'Помощь', en: 'Help' },
+				links: [{ href: 'https://example.com/docs', label: { ru: 'Документация', en: 'Docs' } }],
+			},
+		],
+	},
+})
+```
+
+- `after` ставит карточку после героя, после «Подключить» или, по умолчанию, в конец, после инструментов.
+- Текст -- строка или `{ ru, en }`. Перевод в `service.strings` по ключу `card.<id>.title`, `card.<id>.text` или `card.<id>.link.<i>` сильнее него.
+- `href` -- путь страницы без языка (на английской странице `/account` станет `/en/account`), `#якорь`, `https://` или `mailto:`. Внешняя ссылка открывается в новой вкладке и получает стрелку. Файл вроде `/llms.txt` остаётся как есть. Остальное, повтор `id` или карточка без заголовка роняют сборку.
+- `primary` делает ссылку главной кнопкой, остальные -- обведённые.
+
+Когда карточки мало, например нужен остров со статусом, сервис перекрывает `index` и строит её на лендинге кита со слотами: `after-hero`, `after-connect` и слот по умолчанию в конце. Карточки конфига остаются на местах, а `LandingCard` рисует карточку того же вида со своей разметкой внутри:
+
+```astro
+---
+// src/frontend/pages/[...lang]/index.astro, с override: ['index']
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Landing from '@aimuzov/infra-mcp-kit/astro/landing.astro'
+import { localePaths } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+import CorpusStatus from '#frontend/components/corpus-status.svelte'
+
+export const getStaticPaths = localePaths
+---
+
+<Landing>
+	<CorpusStatus slot="after-hero" client:load />
+	<LandingCard slot="after-connect" id="faq" title="Вопросы">
+		<p class="muted">Своя разметка между заголовком и ссылками.</p>
+	</LandingCard>
+</Landing>
+```
+
 ### Языки
 
 С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.

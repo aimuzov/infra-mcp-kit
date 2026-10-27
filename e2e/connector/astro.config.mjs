@@ -26,6 +26,11 @@ export default defineConfig({
 						'fixture.dataLead': 'Удалить корпус и выйти из кабинета.',
 						'fixture.delete': 'Удалить корпус',
 						'fixture.logout': 'Выйти',
+						'fixture.status': 'Статус корпуса',
+						'fixture.statusText': 'Остров сервиса в слоте после героя.',
+						'fixture.faq': 'Вопросы',
+						'fixture.faqText': 'Своя разметка внутри карточки кита.',
+						'fixture.end': 'Последний слот: после инструментов и карточек конфига.',
 					},
 					en: {
 						'service.tagline': 'A check of the kit pages on Astro',
@@ -44,6 +49,14 @@ export default defineConfig({
 						'fixture.dataLead': 'Delete the corpus and sign out.',
 						'fixture.delete': 'Delete the corpus',
 						'fixture.logout': 'Sign out',
+						'card.account.title': 'Account first',
+						'card.account.text': 'Sign in and upload the corpus, then connect.',
+						'card.account.link.0': 'Open the account',
+						'fixture.status': 'Corpus status',
+						'fixture.statusText': 'An island of the service in the slot after the hero.',
+						'fixture.faq': 'Questions',
+						'fixture.faqText': 'Own markup inside a kit card.',
+						'fixture.end': 'The last slot: after the tools and the config cards.',
 					},
 				},
 			},
@@ -63,6 +76,27 @@ export default defineConfig({
 			telegram: {
 				botName: 'fixture_bot',
 				grants: ['читать твои данные', 'писать от твоего имени'],
+			},
+			// Перевод первой карточки -- ключами `card.account.*` в `strings.en`, второй -- `{ ru, en }`.
+			landing: {
+				cards: [
+					{
+						id: 'account',
+						after: 'hero',
+						title: 'Сначала кабинет',
+						text: 'Войди и загрузи корпус, потом подключай.',
+						links: [{ href: '/account', label: 'Открыть кабинет', primary: true }],
+					},
+					{
+						id: 'help',
+						title: { ru: 'Помощь', en: 'Help' },
+						text: { ru: 'Как устроен кит и куда писать.', en: 'How the kit works and where to write.' },
+						links: [
+							{ href: 'https://github.com/aimuzov/infra-mcp-kit#readme', label: 'README' },
+							{ href: 'mailto:help@example.com', label: { ru: 'Написать', en: 'Write to us' } },
+						],
+					},
+				],
 			},
 		}),
 	],

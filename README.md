@@ -142,6 +142,59 @@ export default defineConfig({
 
 [`e2e/connector`](e2e/connector) is a working example.
 
+### Landing
+
+A card of the service goes onto the landing with `landing.cards`, no own `index` needed:
+
+```js
+mcpPages({
+	service,
+	landing: {
+		cards: [
+			{
+				id: 'account',
+				after: 'hero',
+				title: 'Сначала кабинет',
+				text: 'Войди и загрузи корпус, потом подключай.',
+				links: [{ href: '/account', label: 'Открыть кабинет', primary: true }],
+			},
+			{
+				id: 'help',
+				title: { ru: 'Помощь', en: 'Help' },
+				links: [{ href: 'https://example.com/docs', label: { ru: 'Документация', en: 'Docs' } }],
+			},
+		],
+	},
+})
+```
+
+- `after` puts a card after the hero, after "Connect" or, by default, at the end after the tools.
+- A text is a string or `{ ru, en }`. A translation in `service.strings` by the key `card.<id>.title`, `card.<id>.text` or `card.<id>.link.<i>` wins over it.
+- `href` is a page path without the language (on an English page `/account` becomes `/en/account`), `#anchor`, `https://` or `mailto:`. An outside link opens in a new tab with an arrow. A file like `/llms.txt` keeps its path. Anything else, a repeated `id` or a missing title fails the build.
+- `primary` makes the link the main button, the others are outlined.
+
+When a card is not enough, say a status island, the service overrides `index` and builds it on the kit's landing with slots: `after-hero`, `after-connect` and the default one at the end. The cards of the config stay in place, and `LandingCard` draws a card of the same look with its own markup inside:
+
+```astro
+---
+// src/frontend/pages/[...lang]/index.astro, with override: ['index']
+import LandingCard from '@aimuzov/infra-mcp-kit/astro/components/landing-card.astro'
+import Landing from '@aimuzov/infra-mcp-kit/astro/landing.astro'
+import { localePaths } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
+
+import CorpusStatus from '#frontend/components/corpus-status.svelte'
+
+export const getStaticPaths = localePaths
+---
+
+<Landing>
+	<CorpusStatus slot="after-hero" client:load />
+	<LandingCard slot="after-connect" id="faq" title="Вопросы">
+		<p class="muted">Своя разметка между заголовком и ссылками.</p>
+	</LandingCard>
+</Landing>
+```
+
 ### Languages
 
 With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.

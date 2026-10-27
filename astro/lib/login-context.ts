@@ -11,6 +11,8 @@ export type LoginContext = {
 	error: string
 	/** Telegram id для входа без виджета, только на localhost. */
 	dev: string
+	/** Имя бота Telegram из окружения сервера: страница собрана без него. */
+	bot: string
 }
 
 export function readLoginContext(hash = location.hash): LoginContext {
@@ -24,6 +26,7 @@ export function readLoginContext(hash = location.hash): LoginContext {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
+		bot: get('bot'),
 	}
 }
 

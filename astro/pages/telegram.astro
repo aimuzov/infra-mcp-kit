@@ -21,7 +21,7 @@ Astro.csp?.insertDirective('frame-src https://oauth.telegram.org')
 	<TelegramLogin
 		client:load
 		service={service.name}
-		botName={telegram.botName}
+		botName={telegram.botName ?? ''}
 		grants={(telegram.grants ?? []).map((grant, i) => own(locale, `telegram.grant.${i}`, grant))}
 		{locale}
 	/>

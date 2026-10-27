@@ -61,8 +61,10 @@ export default defineConfig({
 				],
 			},
 			telegram: {
+				// Запасной бот со сборки: сервер присылает свой из окружения рантайма.
 				botName: 'fixture_bot',
 				grants: ['читать твои данные', 'писать от твоего имени'],
+				account: true,
 			},
 		}),
 	],

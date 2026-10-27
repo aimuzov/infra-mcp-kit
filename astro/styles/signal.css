@@ -510,9 +510,31 @@ h1 {
 }
 
 /* Виджет Telegram рисует свой iframe сразу за скриптом, держим его по центру карточки. */
-.telegram iframe {
-	display: block;
-	margin: 0 auto;
+.telegram {
+	min-height: 40px;
+
+	& iframe {
+		display: block;
+		margin: 0 auto;
+	}
+}
+
+/* Dev-вход на localhost вместо виджета: ссылка в цветах кнопки Telegram. */
+.telegram__dev {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 2.75rem;
+	border-radius: var(--ui-radius-sm);
+	font-weight: 600;
+	color: #fff;
+	text-decoration: none;
+	background: #2aabee;
+
+	&:hover {
+		color: #fff;
+		background: #1e96d4;
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

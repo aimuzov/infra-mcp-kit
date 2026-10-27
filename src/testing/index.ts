@@ -88,7 +88,7 @@ export async function startHttp(
  * В каждой странице только её имя, по нему тест видит, что отдал сервер.
  */
 export function fakePages(dir = mkdtempSync(join(tmpdir(), 'mcp-pages-'))): string {
-	for (const name of ['index', 'login', 'login/telegram', 'error', '404']) {
+	for (const name of ['index', 'login', 'login/telegram', 'account/signin', 'error', '404']) {
 		mkdirSync(dirname(join(dir, name)), { recursive: true })
 		writeFileSync(join(dir, `${name}.html`), `<!doctype html><title>${name}</title>page:${name}\n`)
 	}
@@ -111,6 +111,8 @@ export type LoginStep = {
 	host: string
 	error: string
 	dev: string
+	/** Имя бота Telegram, которое сервер передал странице. */
+	bot: string
 	/** Остальные ключи фрагмента: то, что сервис положил в `Login.context`. */
 	context: Record<string, string>
 }
@@ -144,7 +146,7 @@ export function loginStep(location: string, base: string): LoginStep {
 
 	assert.ok(get('request'), `в адресе входа нет запроса: ${location}`)
 
-	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev'])
+	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev', 'bot'])
 	const context = Object.fromEntries([...hash].filter(([key]) => !own.has(key)))
 
 	return {
@@ -155,6 +157,7 @@ export function loginStep(location: string, base: string): LoginStep {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
+		bot: get('bot'),
 		context,
 	}
 }
@@ -194,6 +197,56 @@ export function devLink() {
 
 		return fetch(url, { redirect: 'manual' })
 	}
+}
+
+export type AccountLoginResult = {
+	/** Ответ `/account/login`: редирект в кабинет или на страницу ошибки. */
+	response: Response
+	/** Заголовок `Cookie` с сессией кабинета, пустой, если вход не удался. */
+	cookie: string
+}
+
+// Подпись с той же секундой и теми же полями совпала бы с прошлой, и кит принял бы её за повтор.
+let signins = 0
+
+/**
+ * Вход в кабинет через `telegramAccount`, как его пройдёт человек: страница входа берёт
+ * `/account/auth` с меткой и cookie, виджет возвращает на `/account/login` с подписью.
+ * `'dev'` -- dev-ссылка на localhost. Каждый вызов подписывает вход заново.
+ */
+export async function accountLogin(
+	base: string,
+	login: { user: Record<string, string>; botToken: string } | 'dev',
+	path = '/account/login',
+): Promise<AccountLoginResult> {
+	const auth = await fetch(new URL('/account/auth', base))
+
+	assert.equal(auth.status, 200, await auth.clone().text())
+
+	const { state } = (await auth.json()) as { state: string }
+	const url = new URL(path, base)
+
+	url.searchParams.set('state', state)
+
+	if (login === 'dev') url.searchParams.set('dev', '1')
+	else {
+		const authDate = Math.floor(Date.now() / 1000) - (signins++ % 300)
+		const signed = signTelegramLogin({ auth_date: String(authDate), ...login.user }, login.botToken)
+
+		for (const [key, value] of Object.entries(signed)) url.searchParams.set(key, value)
+	}
+
+	const response = await fetch(url, { redirect: 'manual', headers: { cookie: cookiesOf(auth).join('; ') } })
+	const cookie = cookiesOf(response)
+		.filter((pair) => !pair.endsWith('='))
+		.join('; ')
+
+	return { response, cookie }
+}
+
+/** Пары `name=value` из `Set-Cookie` ответа. */
+function cookiesOf(response: Response): string[] {
+	return response.headers.getSetCookie().map((line) => line.split(';')[0] ?? '')
 }
 
 /** Регистрация клиента, authorize, вход, колбэк и обмен кода на токены, как это делает Claude. */

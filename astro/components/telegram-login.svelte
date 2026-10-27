@@ -6,12 +6,21 @@
 	import { pt } from '@aimuzov/infra-mcp-kit/astro/lib/i18n.ts'
 	import { callbackUrl, readLoginContext, type LoginContext } from '@aimuzov/infra-mcp-kit/astro/lib/login-context.ts'
 
-	type Props = { service: string; botName: string; grants?: string[]; locale?: string }
+	type Props = {
+		service: string
+		/** Имя бота со сборки. Сервер с `telegramLogin({ botName })` присылает своё во фрагменте. */
+		botName?: string
+		grants?: string[]
+		locale?: string
+	}
 
-	let { service, botName, grants = [], locale = 'ru' }: Props = $props()
+	let { service, botName = '', grants = [], locale = 'ru' }: Props = $props()
 
 	let context = $state<LoginContext | null>(null)
 	let widget = $state<HTMLElement>()
+
+	// Бот из окружения сервера главнее бота со сборки: страницу обычно собирают без окружения прода.
+	const bot = $derived(context?.bot || botName)
 
 	const devUrl = $derived.by(() => {
 		if (!context?.dev) return ''
@@ -30,13 +39,13 @@
 	// Виджет вставляем скриптом: его data-auth-url собирается из фрагмента, а он есть только
 	// в браузере. Источники telegram.org пускает CSP этой страницы, остальные их не знают.
 	$effect(() => {
-		if (!widget || !context?.request || context.dev) return
+		if (!widget || !context?.request || context.dev || !bot) return
 
 		const script = document.createElement('script')
 
 		script.async = true
 		script.src = 'https://telegram.org/js/telegram-widget.js?22'
-		script.dataset.telegramLogin = botName
+		script.dataset.telegramLogin = bot
 		script.dataset.size = 'large'
 		script.dataset.authUrl = callbackUrl(context).href
 		widget.append(script)
@@ -64,32 +73,11 @@
 			<Alert variant="danger">{pt(locale, 'login.broken')}</Alert>
 		{:else if devUrl}
 			<a class="telegram__dev" href={devUrl}>{pt(locale, 'login.dev', { id: context?.dev ?? '' })}</a>
+		{:else if context && !bot}
+			<Alert variant="danger">{pt(locale, 'login.telegramMissing')}</Alert>
 		{:else}
 			<div class="telegram" bind:this={widget}></div>
 		{/if}
 		<p class="hint hint--center">{pt(locale, 'login.ignore')}</p>
 	</Card>
 </div>
-
-<style>
-	.telegram {
-		min-height: 40px;
-	}
-
-	.telegram__dev {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 2.75rem;
-		border-radius: var(--ui-radius-sm);
-		font-weight: 600;
-		color: #fff;
-		text-decoration: none;
-		background: #2aabee;
-
-		&:hover {
-			color: #fff;
-			background: #1e96d4;
-		}
-	}
-</style>

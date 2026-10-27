@@ -246,13 +246,21 @@ describe('вход в кабинет через Telegram', () => {
 	test('на проде devUserId не работает, а только пишет в лог', async () => {
 		const warnings: string[] = []
 		const logger = { ...log, warn: (message: string) => warnings.push(message) }
-		const app = createHttpApp({
-			config: loadHttpConfig({ AUTH_SECRET: SECRET, PUBLIC_URL: 'https://mcp.example.com' }),
-			service: { name: 'test' },
-			createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
-			logger,
-			routes: [telegramAccount({ botToken: BOT, botName: 'test_bot', devUserId: '7' }), state()],
-		})
+		// Один маршрут на два приложения: dev-вход на localhost не должен открыть его и проду.
+		const account = telegramAccount({ botToken: BOT, botName: 'test_bot', devUserId: '7' })
+		const appAt = (url: string) =>
+			createHttpApp({
+				config: loadHttpConfig({ AUTH_SECRET: SECRET, PUBLIC_URL: url }),
+				service: { name: 'test' },
+				createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
+				logger,
+				routes: [account, state()],
+			})
+		const local = await appAt('http://localhost:8080').handle(new Request('http://localhost:8080/account/auth'))
+
+		assert.equal(((await local.json()) as { dev: string | null }).dev, '7')
+
+		const app = appAt('https://mcp.example.com')
 		const auth = await app.handle(new Request('https://mcp.example.com/account/auth'))
 		const body = (await auth.json()) as { dev: string | null; state: string }
 

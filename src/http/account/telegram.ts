@@ -13,7 +13,6 @@ import {
 import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
-import type { Logger } from '#kit/log'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
@@ -64,7 +63,7 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 	const claimsOf = (user: TelegramUser) =>
 		ownClaims(options.claims?.(user) ?? { name: user.firstName || user.username })
 	let session = options.sessions
-	let devUserId: string | undefined
+	let devWarned = false
 
 	return async (request, context) => {
 		const url = new URL(request.url)
@@ -75,7 +74,19 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 			`${SIGNIN_COOKIE}=${value}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure}`
 
 		session ??= cookieSessions(context.tokens, publicUrl)
-		devUserId ??= loopbackOnly(options.devUserId, publicUrl, context.logger)
+
+		// Dev-вход пускает без подписи, поэтому только на localhost. `loadTelegramConfig` это уже
+		// проверяет, но `devUserId` можно передать и руками: на проде он только оставит строку в логе.
+		// Адрес смотрим в каждом запросе: один маршрут могут отдать и локальному приложению, и проду.
+		const devUserId = options.devUserId && isLoopback(publicUrl) ? options.devUserId : ''
+
+		if (options.devUserId && !devUserId && !devWarned) {
+			devWarned = true
+
+			context.logger.warn('telegramAccount: devUserId is ignored, PUBLIC_URL is not on localhost', {
+				publicUrl: publicUrl.origin,
+			})
+		}
 
 		if (route === 'GET /account/auth') {
 			const state = randomBytes(24).toString('base64url')
@@ -126,20 +137,6 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 		return undefined
 	}
-}
-
-/**
- * Dev-вход пускает без подписи, поэтому только на localhost. `loadTelegramConfig` это уже
- * проверяет, но `devUserId` можно передать и руками: на проде он только оставит строку в логе.
- */
-function loopbackOnly(devUserId: string | undefined, publicUrl: URL, logger: Logger): string {
-	if (!devUserId || isLoopback(publicUrl)) return devUserId ?? ''
-
-	logger.warn('telegramAccount: devUserId is ignored, PUBLIC_URL is not on localhost', {
-		publicUrl: publicUrl.origin,
-	})
-
-	return ''
 }
 
 function redirect(location: string, cookie?: string): Response {

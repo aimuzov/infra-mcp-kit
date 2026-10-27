@@ -243,10 +243,10 @@ describe('вход в кабинет через Telegram', () => {
 		assert.equal(errorOf((await accountLogin(prod, 'dev')).response).code, 'login')
 	})
 
-	test('на проде devUserId не работает, а только пишет в лог', async () => {
+	test('на проде devUserId не работает, а только пишет в лог, и сессия -- своего приложения', async () => {
 		const warnings: string[] = []
 		const logger = { ...log, warn: (message: string) => warnings.push(message) }
-		// Один маршрут на два приложения: dev-вход на localhost не должен открыть его и проду.
+		// Один маршрут на два приложения: что видел localhost, не должно попасть в прод.
 		const account = telegramAccount({ botToken: BOT, botName: 'test_bot', devUserId: '7' })
 		const appAt = (url: string) =>
 			createHttpApp({
@@ -275,6 +275,17 @@ describe('вход в кабинет через Telegram', () => {
 		assert.equal(login.headers.getSetCookie().length, 0)
 		assert.equal(warnings.length, 1)
 		assert.match(warnings[0] ?? '', /devUserId is ignored/)
+
+		const signed = new URL(`https://mcp.example.com/account/login?state=${body.state}`)
+
+		for (const [key, value] of Object.entries(freshTelegramLogin(IVAN, BOT))) signed.searchParams.set(key, value)
+
+		const session = (await app.handle(new Request(signed, { headers: { cookie } }))).headers.getSetCookie()[0]
+		const me = await app.handle(
+			new Request('https://mcp.example.com/account/state', { headers: { cookie: session?.split(';')[0] ?? '' } }),
+		)
+
+		assert.equal(me.status, 200)
 	})
 
 	test('свои claims сессии, но sub -- всегда Telegram id', async () => {

@@ -62,7 +62,6 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 	const claimsOf = (user: TelegramUser) =>
 		ownClaims(options.claims?.(user) ?? { name: user.firstName || user.username })
-	let session = options.sessions
 	let devWarned = false
 
 	return async (request, context) => {
@@ -73,11 +72,12 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 		const signinCookie = (value: string, maxAge: number) =>
 			`${SIGNIN_COOKIE}=${value}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure}`
 
-		session ??= cookieSessions(context.tokens, publicUrl)
+		// Сессии и dev-вход берём по приложению каждого запроса: один маршрут могут отдать
+		// и локальному приложению, и проду.
+		const session = options.sessions ?? cookieSessions(context.tokens, publicUrl)
 
 		// Dev-вход пускает без подписи, поэтому только на localhost. `loadTelegramConfig` это уже
 		// проверяет, но `devUserId` можно передать и руками: на проде он только оставит строку в логе.
-		// Адрес смотрим в каждом запросе: один маршрут могут отдать и локальному приложению, и проду.
 		const devUserId = options.devUserId && isLoopback(publicUrl) ? options.devUserId : ''
 
 		if (options.devUserId && !devUserId && !devWarned) {

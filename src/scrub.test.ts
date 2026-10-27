@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import { inspect } from 'node:util'
 
 import { createLogger } from './log.ts'
-import { addScrubRules, FILTERED, scrub, scrubBreadcrumb, scrubEvent } from './scrub.ts'
+import { addScrubRules, FILTERED, scrub, scrubBreadcrumb, scrubEvent, scrubSpan, scrubValue } from './scrub.ts'
 
 // Ненастоящие, но той же формы, что и настоящие.
 const JWT =
@@ -13,6 +14,7 @@ const KAITEN = 'e3b0c442-98fc-4c14-9afb-f4c8996fb924'
 const BOT = '7012345678:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw2'
 const HEX = 'a3f1c9e07b2d4e8f9a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d'
 const OPAQUE = 'q4eC39HqLyjWDarjtT1zdp7dcXz9K2mQ8wR5n'
+const LETTERS = 'qLyjWDarjtTdpdcXzKmQwRnBvCxZaSdF'
 
 describe('scrub: каждый класс секрета', () => {
 	const cases: Array<[string, string, string]> = [
@@ -65,6 +67,58 @@ describe('scrub: каждый класс секрета', () => {
 			`{"password": "${FILTERED}", 'api_key': '${FILTERED}'}`,
 		],
 		['переменная окружения', 'KAITEN_API_TOKEN=abc is set twice', `KAITEN_API_TOKEN=${FILTERED} is set twice`],
+		['пароль-слово после двоеточия', 'password: swordfish', `password: ${FILTERED}`],
+		['пароль-слово с заглавной', 'login as bob, password: Swordfish', `login as bob, password: ${FILTERED}`],
+		['токен из букв', 'token: Secretvalue', `token: ${FILTERED}`],
+		['длинная строка из одних букв', `secret ${LETTERS} leaked`, `secret ${FILTERED} leaked`],
+		[
+			'заголовок с новой строки',
+			'upstream rejected request\nCookie: sid=s3ss10n; theme=dark',
+			`upstream rejected request\nCookie: ${FILTERED}`,
+		],
+		[
+			'Authorization с новой строки, короткий токен',
+			'upstream rejected request\nAuthorization: Token abc123',
+			`upstream rejected request\nAuthorization: ${FILTERED}`,
+		],
+		['Basic с новой строки', 'upstream rejected\nBasic dXNlcjpwYXNz', `upstream rejected\nBasic ${FILTERED}`],
+		[
+			'Digest с кавычками внутри',
+			'proxy-authorization: Digest username="bob", response="6629fae4"',
+			`proxy-authorization: ${FILTERED}`,
+		],
+		[
+			'короткие ключи в JSON',
+			'{"client_secret":"s3cr3t","api_key":"k-42","token":"short1"}',
+			`{"client_secret":"${FILTERED}","api_key":"${FILTERED}","token":"${FILTERED}"}`,
+		],
+		['Authorization в JSON', '{"Authorization": "Token abc123"}', `{"Authorization": "${FILTERED}"}`],
+		[
+			'массив set-cookie',
+			'response headers: {"set-cookie":["sid=s3ss10n; Path=/; HttpOnly", "theme=dark"]}',
+			`response headers: {"set-cookie":${FILTERED}}`,
+		],
+		['массив authorization', '{"authorization":["Token abc123"]}', `{"authorization":${FILTERED}}`],
+		[
+			'пары заголовков',
+			"[['authorization', 'Token abc123'], ['cookie', 'sid=s3ss10n']]",
+			`[['authorization', '${FILTERED}'], ['cookie', '${FILTERED}']]`,
+		],
+		[
+			'Map из util.inspect',
+			"Map(3) { 'authorization' => 'Token abc123', 'cookie' => 'sid=s3ss10n', 'password' => 'hunter2' }",
+			`Map(3) { 'authorization' => '${FILTERED}', 'cookie' => '${FILTERED}', 'password' => '${FILTERED}' }`,
+		],
+		[
+			'JSON строкой внутри JSON',
+			'{"error":"{\\"password\\":\\"correct horse\\"}"}',
+			`{"error":"{\\"password\\":\\"${FILTERED}\\"}"}`,
+		],
+		[
+			'экранированный перевод строки перед заголовком',
+			'{"message":"denied\\nCookie: sid=s3ss10n"}',
+			`{"message":"denied\\nCookie: ${FILTERED}`,
+		],
 	]
 
 	for (const [name, input, expected] of cases) {
@@ -91,9 +145,30 @@ test('scrub: обычный текст не портится', () => {
 		'/Users/aimuzov/Projects/aimuzov/infra-mcp-kit/src/http/oauth/router.ts:290:17',
 		'release-please--branches--main--components--infra-mcp-kit',
 		'at 2026-10-28T02:16:00.000Z, status code: 500',
+		'Invalid token: expired.',
+		'{"password": null, "token": false}',
+		// Имена из SDK длиннее 32 символов: длинная строка, но из слов.
+		"Cannot read properties of undefined (reading 'getOAuthProtectedResourceMetadataUrl')",
+		'client.registerToolWithStructuredOutputSchema is not a function',
+		'WebStandardStreamableHTTPServerTransport.handleRequest failed',
+		'Request exceeds max_tokens=4096, "input_tokens": 12',
+		'WWW-Authenticate: Bearer realm="mcp", error="invalid_token"',
+		'WWW-Authenticate: Bearer resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"',
 	]
 
 	for (const text of plain) assert.equal(scrub(text), text)
+})
+
+test('scrub: заголовки из util.inspect, в том числе в несколько строк', () => {
+	const headers = {
+		'set-cookie': ['sid=s3ss10n; Path=/; HttpOnly; SameSite=Lax', 'theme=dark; Path=/; Max-Age=31536000'],
+		authorization: 'Token abc123',
+		accept: 'application/json',
+	}
+	const text = scrub(`upstream 401, headers: ${inspect(headers)}`)
+
+	assert.ok(!/s3ss10n|theme=dark|abc123/.test(text), text)
+	assert.match(text, /accept: 'application\/json'/)
 })
 
 test('scrub: медленных случаев на длинном мусоре нет', () => {
@@ -106,6 +181,12 @@ test('scrub: медленных случаев на длинном мусоре 
 		'x='.repeat(20_000),
 		'token-'.repeat(7_000),
 		'token="x '.repeat(5_000),
+		`cookie: [${"'a'  ".repeat(8_000)}`,
+		"'cookie', ".repeat(8_000),
+		"'token' => ".repeat(8_000),
+		'\\"token\\":\\"'.repeat(5_000),
+		'Bearer '.repeat(8_000),
+		'Ab'.repeat(20_000),
 	]
 
 	for (const junk of junks) scrub(junk)
@@ -234,12 +315,190 @@ describe('scrubEvent', () => {
 	})
 
 	test('query запроса объектом или парами теряет значения, имена остаются', () => {
-		const object = scrubEvent({ request: { query_string: { token: 't', q: 'x' } } })
-		const pairs = scrubEvent({ request: { query_string: [['token', 't']] } })
+		const object = scrubEvent({ request: { query_string: { token: 't', q: 'x', [JWT]: '' } } })
+		const pairs = scrubEvent({
+			request: {
+				query_string: [
+					['token', 't'],
+					[JWT, ''],
+				],
+			},
+		})
 
-		assert.deepEqual(object.request.query_string, { token: FILTERED, q: FILTERED })
-		assert.deepEqual(pairs.request.query_string, [['token', FILTERED]])
+		assert.deepEqual(object.request.query_string, { token: FILTERED, q: FILTERED, [FILTERED]: FILTERED })
+
+		assert.deepEqual(pairs.request.query_string, [
+			['token', FILTERED],
+			[FILTERED, FILTERED],
+		])
 	})
+
+	test('query и фрагмент в полях события: голое значение, правила сервиса и хвост после `;`', () => {
+		addScrubRules('kt_SERVICE_SECRET')
+
+		const event = scrubEvent({
+			request: { url: `https://srv.example/magic?${JWT}`, query_string: JWT },
+			breadcrumbs: [{ category: 'http', data: { 'http.query': `?${JWT}`, 'http.fragment': `#${KAITEN}` } }],
+			contexts: { trace: { data: { 'url.query': 'state=a;tail', 'http.query': '?kt_SERVICE_SECRET&debug' } } },
+			extra: { query: `user search: Bearer ${JWT}` },
+		})
+
+		assert.deepEqual(event.request, { url: `https://srv.example/magic?${FILTERED}`, query_string: FILTERED })
+		assert.deepEqual(event.breadcrumbs[0]?.data, { 'http.query': `?${FILTERED}`, 'http.fragment': `#${FILTERED}` })
+
+		assert.deepEqual(event.contexts.trace.data, {
+			'url.query': `state=${FILTERED};${FILTERED}`,
+			'http.query': `?${FILTERED}&${FILTERED}`,
+		})
+
+		assert.deepEqual(event.extra, { query: FILTERED })
+	})
+
+	test('кадры из строк текста ошибки: секрет не уходит ни в одно поле кадра', () => {
+		const event = scrubEvent({
+			exception: {
+				values: [
+					{
+						value: `upstream 401\nsession issued at ${JWT} (expired)`,
+						stacktrace: {
+							frames: [
+								{ function: JWT, filename: 'expired', in_app: false },
+								{ function: `Bearer ${KAITEN}`, module: `bot${BOT}`, filename: 'rotate', lineno: 1 },
+								{
+									function: 'Object.registerToolWithStructuredOutputSchema',
+									context_line: `token=${KAITEN}`,
+									pre_context: [`const key = '${HEX}'`],
+								},
+							],
+						},
+					},
+				],
+			},
+		})
+
+		assert.deepEqual(event.exception.values[0]?.stacktrace.frames, [
+			{ function: FILTERED, filename: 'expired', in_app: false },
+			{ function: `Bearer ${FILTERED}`, module: `bot${FILTERED}`, filename: 'rotate', lineno: 1 },
+			{
+				function: 'Object.registerToolWithStructuredOutputSchema',
+				context_line: `token=${FILTERED}`,
+				pre_context: [`const key = '${FILTERED}'`],
+			},
+		])
+	})
+
+	test('число под секретным ключом тоже секрет, а счётчик токенов, флаг и null нет', () => {
+		const { extra, breadcrumbs } = scrubEvent({
+			extra: {
+				password: 123456,
+				session_id: 42,
+				token: 9876543210n,
+				hasToken: true,
+				password_hint: null,
+				input_tokens: 12,
+				usage: { 'gen_ai.usage.output_tokens': 7 },
+			},
+			breadcrumbs: [{ category: 'console', data: { arguments: [{ password: 271828 }] } }],
+		})
+
+		assert.deepEqual(extra, {
+			password: FILTERED,
+			session_id: FILTERED,
+			token: FILTERED,
+			hasToken: true,
+			password_hint: null,
+			input_tokens: 12,
+			usage: { 'gen_ai.usage.output_tokens': 7 },
+		})
+
+		assert.deepEqual(breadcrumbs, [{ category: 'console', data: { arguments: [{ password: FILTERED }] } }])
+	})
+})
+
+test('scrubSpan: спан SDK 11 и спан внутри транзакции', () => {
+	const ids = { trace_id: 'b'.repeat(32), span_id: 'c'.repeat(16) }
+	const span = {
+		...ids,
+		name: 'GET /callback?code=abc',
+		is_segment: true,
+		attributes: {
+			'url.full': `https://kaiten.example/api?token=${KAITEN}`,
+			'url.query': `?${JWT}`,
+			'http.request.header.authorization': 'Token abc123',
+			'gen_ai.usage.input_tokens': 12,
+			'sentry.op': 'http.client',
+		},
+		links: [{ ...ids, attributes: { note: `Bearer ${KAITEN}` } }],
+	}
+
+	assert.deepEqual(scrubSpan(span), {
+		...ids,
+		name: `GET /callback?code=${FILTERED}`,
+		is_segment: true,
+		attributes: {
+			'url.full': `https://kaiten.example/api?token=${FILTERED}`,
+			'url.query': `?${FILTERED}`,
+			'http.request.header.authorization': FILTERED,
+			'gen_ai.usage.input_tokens': 12,
+			'sentry.op': 'http.client',
+		},
+		links: [{ ...ids, attributes: { note: `Bearer ${FILTERED}` } }],
+	})
+
+	assert.equal(span.attributes['url.query'], `?${JWT}`, 'спан не меняется, возвращается копия')
+
+	assert.deepEqual(scrubSpan({ description: 'GET /x?token=1', data: { password: 1 } }), {
+		description: `GET /x?token=${FILTERED}`,
+		data: { password: FILTERED },
+	})
+})
+
+test('scrubValue: копия без секретов для своего логгера', () => {
+	assert.deepEqual(scrubValue({ message: 'upstream: {"token":"short1"}', nested: [{ cookie: 'a=b' }] }), {
+		message: `upstream: {"token":"${FILTERED}"}`,
+		nested: [{ cookie: FILTERED }],
+	})
+})
+
+test('лог: текст ошибки апстрима в meta чистится до сериализации в JSON', () => {
+	const lines: string[] = []
+	const logger = createLogger({ write: (line) => lines.push(line) })
+	const upstream = [
+		'auth API 500: {"login":"bob","password":"correct horse, battery"}',
+		'upstream 400: {"client_secret":"s3cr3t","api_key":"k-42"}',
+		'kaiten 401: {"Authorization": "Token abc123"}',
+		'{"token":"short1"}',
+		'upstream rejected request\nCookie: sid=s3ss10n; theme=dark',
+		'upstream rejected request\nBasic dXNlcjpwYXNz',
+	]
+
+	for (const message of upstream) logger.error('login failed', { message, at: new Date(0) })
+
+	assert.equal(lines.length, upstream.length)
+
+	for (const line of lines) {
+		assert.ok(!/correct horse|s3cr3t|k-42|abc123|short1|s3ss10n|dXNlcjpwYXNz/.test(line), line)
+		// `Date` в логе строкой, как без чистки.
+		assert.match(line, /"at":"1970-01-01T00:00:00\.000Z"\}\n$/)
+	}
+
+	assert.match(lines[0]!, /\{"message":"auth API 500: \{\\"login\\":\\"bob\\",\\"password\\":\\"\[Filtered\]\\"\}"/)
+})
+
+test('лог: meta, которая не превращается в JSON', () => {
+	const lines: string[] = []
+	const logger = createLogger({ write: (line) => lines.push(line) })
+	const loop: Record<string, unknown> = {}
+
+	loop.self = loop
+	logger.info('loop', loop)
+	logger.info('fn', () => 1)
+	logger.info('text', 'token=abc')
+
+	assert.deepEqual(
+		lines.map((line) => line.replace(/^\S+ /, '')),
+		['INFO loop [object Object]\n', 'INFO fn undefined\n', 'INFO text "token=[Filtered]"\n'],
+	)
 })
 
 test('лог в stderr не пишет секреты', () => {

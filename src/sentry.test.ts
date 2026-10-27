@@ -171,10 +171,14 @@ describe('sentry', () => {
 		assert.deepEqual(await events(), [])
 	})
 
-	test('с SENTRY_DSN включается: релиз из имени и версии, окружение production', async () => {
+	test('с SENTRY_DSN включается: релиз из имени и версии, окружение production', async (t) => {
 		const env = { SENTRY_DSN: 'https://public@o0.ingest.sentry.io/1' }
+		const warn = t.mock.method(console, 'warn')
 
 		assert.equal(await initSentry({ name: 'kit-test', version: '1.2.3', env, transport }), true)
+		// SDK 11 ругается в stderr на опции, которые сам не вызовет, например `beforeSendTransaction`.
+		assert.equal(warn.mock.callCount(), 0, String(warn.mock.calls[0]?.arguments))
+
 		// Повторный вызов не переинициализирует SDK.
 		assert.equal(await initSentry({ name: 'other', version: '9.9.9', env, transport }), true)
 
@@ -297,6 +301,50 @@ describe('sentry', () => {
 		)
 
 		assert.ok(!sent[0]!.raw.includes(PLANTED) && !sent[0]!.raw.includes(JWT))
+	})
+
+	test('строки текста ошибки, похожие на кадры стека, уходят без секретов', async () => {
+		captureError(new Error(`upstream 401\nsession issued at ${JWT} (expired)`))
+
+		captureError(
+			new Error('fetch failed', {
+				cause: new Error(
+					`telegram said\nbot at ${BOT_TOKEN} (blocked)\nkey revoked at Bearer ${PLANTED} (rotate)`,
+				),
+			}),
+		)
+
+		assert.equal((await events()).length, 2)
+		// SDK и правда собрал кадры из этих строк: секрет был в имени функции.
+		assert.ok(sent.every(({ raw }) => raw.includes('"function":"[Filtered]"')))
+
+		for (const { raw } of sent) {
+			for (const secret of [JWT, BOT_TOKEN, PLANTED]) assert.ok(!raw.includes(secret), raw)
+		}
+	})
+
+	test('ошибка входа с паролем: пароль из ответа апстрима не попадает в лог', async () => {
+		const password = 'correct horse, battery'
+		const lines: string[] = []
+		const login = tokenFormLogin({
+			fields: [
+				{ name: 'login', label: 'Логин' },
+				{ name: 'password', label: 'Пароль', type: 'password' },
+			],
+			verify: (values) => {
+				// Апстрим повторяет тело запроса в тексте ошибки.
+				throw new Error(`auth API 500: ${JSON.stringify(values)}`)
+			},
+		})
+		const base = await startApp({ login, logger: createLogger({ write: (line) => lines.push(line) }) })
+
+		await assert.rejects(oauthFlow({ base, login: submitForm({ login: 'bob', password }) }), /303/)
+
+		const logged = lines.find((line) => line.includes('login failed')) ?? ''
+
+		assert.ok(!logged.includes(password), logged)
+		assert.match(logged, /\\"login\\":\\"bob\\"/, 'остальной текст ошибки на месте')
+		assert.ok((await events()).length === 1 && !sent[0]!.raw.includes(password))
 	})
 
 	test('ошибка входа по токену уходит только типом и кодом, лог без токена', async () => {

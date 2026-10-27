@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 
-import { scrub } from './scrub.ts'
+import { scrub, scrubValue } from './scrub.ts'
 
 /**
  * Лог только в stderr и, по желанию, в файл: stdout в stdio-режиме занят JSON-RPC,
@@ -28,9 +28,9 @@ export function createLogger({
 	const at = (lvl: LogLevel) => (message: string, meta?: unknown) => {
 		if (ORDER[lvl] > ORDER[level]) return
 
-		const tail = meta === undefined ? '' : ` ${stringify(meta)}`
 		// Сюда попадает текст ошибок апстрима, а лог читают дальше этого процесса.
-		const line = `[${new Date().toISOString()}] ${lvl.toUpperCase()} ${scrub(`${message}${tail}`)}\n`
+		const tail = meta === undefined ? '' : ` ${stringify(meta)}`
+		const line = `[${new Date().toISOString()}] ${lvl.toUpperCase()} ${scrub(message)}${tail}\n`
 
 		write(line)
 
@@ -49,11 +49,18 @@ export function createLogger({
 	return { error: at('error'), warn: at('warn'), info: at('info'), debug: at('debug') }
 }
 
+/**
+ * JSON без секретов. Чистим до сериализации: в готовом JSON кавычки и переводы строк
+ * экранированы, и правила по ним уже не срабатывают.
+ */
 function stringify(value: unknown): string {
 	try {
-		return JSON.stringify(value)
+		// Туда и обратно через JSON: так `Date` и `URL` попадают в лог строкой, как и раньше.
+		const json = JSON.stringify(value)
+
+		return json === undefined ? 'undefined' : JSON.stringify(scrubValue(JSON.parse(json)))
 	} catch {
-		return String(value)
+		return scrub(String(value))
 	}
 }
 

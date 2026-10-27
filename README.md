@@ -74,19 +74,20 @@ Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. 
 
 ### Secrets in reports and logs
 
-An error message is written by whoever threw the error, most often the upstream. It can carry tokens and request URLs. Before sending, `scrubEvent` walks the exception messages, the message, `extra`, `contexts`, tags, the request, breadcrumbs and spans and replaces secrets with `[Filtered]`:
+An error message is written by whoever threw the error, most often the upstream. It can carry tokens and request URLs. Before sending, `scrubEvent` walks the exception messages and their stack frames, the message, `extra`, `contexts`, tags, the request, breadcrumbs and spans and replaces secrets with `[Filtered]`:
 
 - JWT and JWE (`eyJ...` with dots) and the value after `Bearer` or `Basic`.
-- UUIDs, hex of 32 characters and more, and long base64url strings with digits.
+- UUIDs, hex of 32 characters and more, and long base64url strings with digits or mixed case. Long names made of words, like `getOAuthProtectedResourceMetadataUrl`, stay.
 - A Telegram bot token (`123456:AA...`), including inside a `/bot<token>/` URL.
-- Query and fragment values (`?token=`, `?code=`, `?state=`, `#access_token=`) and form body pairs. Parameter names stay.
+- Query and fragment values (`?token=`, `?code=`, `?state=`, `#access_token=`) and form body pairs. Parameter names stay. In fields that hold a query, like `request.query_string` or `http.query`, a segment without `=` is a value too.
 - Userinfo in a URL: `https://user:pass@host`.
-- Values of `Authorization` and `Cookie` headers in text and of keys like `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`.
+- Values of `Authorization`, `Cookie` and `Set-Cookie` headers in text, including arrays, `[name, value]` pairs and `Map` from `util.inspect`, and of keys like `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`, `password: swordfish`. A word about the state after a bare colon stays: `token: expired`, `password: required`. So does a model token count: `max_tokens=4096`.
+- Any value under such a key in `extra`, `contexts`, breadcrumbs and spans, numbers included.
 - In the event's request, the body and cookies as a whole, and `Authorization`, `Cookie`, `X-Api-Key` and similar headers.
 
 A sign-in error (OAuth callback, token form, Telegram, account sign-in) leaves with no message at all, only the type and a code: `ECONNREFUSED` or an HTTP status. Its message comes from the service the person has just handed a token to, and no set of rules can guess every token format. `withoutMessage(error)` gives the server the same copy of its own error.
 
-The kit's logger passes every line for stderr and `LOG_FILE` through `scrub(text)`, and `runCli` cleans the error line it stops on the same way. A custom `logger` given to `createHttpApp` or `tool` gets the text as is, so clean it with `scrub` yourself.
+The kit's logger cleans every line for stderr and `LOG_FILE`: the message with `scrub(text)`, and the `meta` object with `scrubValue(value)` before it becomes JSON. In ready JSON quotes and line breaks are escaped, and the rules no longer see them. `runCli` cleans the error line it stops on the same way. A custom `logger` given to `createHttpApp` or `tool` gets the text as is, so clean it yourself the same way: `scrub` for the message, `scrubValue` for `meta` before serializing.
 
 A service adds rules for its own secrets once at startup, before `runCli`. They run before the built-in ones and apply both to Sentry and to the log:
 
@@ -103,7 +104,7 @@ addScrubRules(
 )
 ```
 
-If the server set up Sentry itself, the kit cleans only its own events, with a processor on a copy of the scope. For the rest, add `beforeSend: scrubEvent`, `beforeSendTransaction: scrubEvent` and `beforeBreadcrumb: scrubBreadcrumb` to your `Sentry.init`.
+If the server set up Sentry itself, the kit cleans only its own events, with a processor on a copy of the scope. For the rest, add `beforeSend: scrubEvent`, `beforeSendSpan: scrubSpan` and `beforeBreadcrumb: scrubBreadcrumb` to your `Sentry.init`. SDK 11 streams spans by default and ignores `beforeSendTransaction`; with `traceLifecycle: 'static'` spans go inside the transaction, so set `beforeSendTransaction: scrubEvent` instead of `beforeSendSpan`.
 
 ## HTTP and OAuth
 

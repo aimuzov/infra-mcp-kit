@@ -89,7 +89,6 @@ export async function initSentry({ name, version, env = process.env, transport }
 		// Текст ошибок пишет апстрим, и `dataCollection` его не касается: секреты из него
 		// вычищает `scrubEvent`.
 		beforeSend: scrubEvent,
-		beforeSendTransaction: scrubEvent,
 		beforeBreadcrumb: scrubBreadcrumb,
 		integrations: [
 			sentry.eventFiltersIntegration(),

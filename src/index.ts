@@ -23,7 +23,7 @@ export {
 	type Transport,
 } from './mcp.ts'
 export { failure, json, messageOf, text, tool, type JsonOptions, type ToolOptions } from './results.ts'
-export { addScrubRules, scrub, scrubBreadcrumb, scrubEvent, type ScrubRule } from './scrub.ts'
+export { addScrubRules, scrub, scrubBreadcrumb, scrubEvent, scrubSpan, scrubValue, type ScrubRule } from './scrub.ts'
 export { captureError, flushSentry, initSentry, withoutMessage, withTags, type SentryOptions } from './sentry.ts'
 export { serveStdio, StdioServerTransport } from './stdio.ts'
 export { readVersion } from './version.ts'

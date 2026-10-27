@@ -74,19 +74,20 @@ await runCli({
 
 ### Секреты в отчётах и логе
 
-Текст ошибки пишет тот, кто её бросил, чаще всего апстрим. В нём бывают токены и адреса запросов. Перед отправкой `scrubEvent` проходит по тексту исключений, сообщению, `extra`, `contexts`, тегам, запросу, хлебным крошкам и спанам и меняет секреты на `[Filtered]`:
+Текст ошибки пишет тот, кто её бросил, чаще всего апстрим. В нём бывают токены и адреса запросов. Перед отправкой `scrubEvent` проходит по тексту исключений и их кадрам стека, сообщению, `extra`, `contexts`, тегам, запросу, хлебным крошкам и спанам и меняет секреты на `[Filtered]`:
 
 - JWT и JWE (`eyJ...` с точками) и значение после `Bearer` или `Basic`.
-- UUID, hex от 32 символов и длинные base64url-строки с цифрами.
+- UUID, hex от 32 символов и длинные base64url-строки с цифрами или в разном регистре. Длинные имена из слов вроде `getOAuthProtectedResourceMetadataUrl` остаются.
 - Токен бота Telegram (`123456:AA...`), в том числе внутри адреса `/bot<token>/`.
-- Значения query и фрагмента (`?token=`, `?code=`, `?state=`, `#access_token=`) и пары тела формы. Имена параметров остаются.
+- Значения query и фрагмента (`?token=`, `?code=`, `?state=`, `#access_token=`) и пары тела формы. Имена параметров остаются. В полях, где лежит query, вроде `request.query_string` или `http.query`, значение и сегмент без `=`.
 - Userinfo в адресе: `https://user:pass@host`.
-- Значения заголовков `Authorization` и `Cookie` в тексте и ключей вроде `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`.
+- Значения заголовков `Authorization`, `Cookie` и `Set-Cookie` в тексте, в том числе массивом, парой `[имя, значение]` и `Map` из `util.inspect`, и ключей вроде `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`, `password: swordfish`. Слово о состоянии после голого двоеточия остаётся: `token: expired`, `password: required`. Счётчик токенов модели тоже: `max_tokens=4096`.
+- Любое значение под таким ключом в `extra`, `contexts`, хлебных крошках и спанах, число тоже.
 - В запросе события тело и cookie целиком, заголовки `Authorization`, `Cookie`, `X-Api-Key` и похожие.
 
 Ошибка входа (OAuth-колбэк, форма токена, Telegram, вход в кабинет) уходит совсем без текста, только тип и код: `ECONNREFUSED` или HTTP-статус. Её текст пишет сервис, которому человек только что отдал токен, а формат любого токена правилами не угадать. Такую же копию своей ошибки сервер получит через `withoutMessage(error)`.
 
-Логгер кита пропускает через `scrub(text)` каждую строку в stderr и `LOG_FILE`, а `runCli` так же чистит строку ошибки, на которой остановился. Свой `logger` в `createHttpApp` или `tool` получает текст как есть, его чистите сами через `scrub`.
+Логгер кита чистит каждую строку в stderr и `LOG_FILE`: сообщение через `scrub(text)`, а объект `meta` через `scrubValue(value)` до того, как он станет JSON. В готовом JSON кавычки и переводы строк экранированы, и правила их уже не видят. `runCli` так же чистит строку ошибки, на которой остановился. Свой `logger` в `createHttpApp` или `tool` получает текст как есть, его чистите сами так же: `scrub` для сообщения, `scrubValue` для `meta` до сериализации.
 
 Свои правила сервис добавляет один раз при старте, до `runCli`. Они идут раньше встроенных и работают и в Sentry, и в логе:
 
@@ -103,7 +104,7 @@ addScrubRules(
 )
 ```
 
-Если сервер завёл Sentry сам, кит чистит только свои события, процессором на копии scope. Для остальных подключите в своём `Sentry.init` `beforeSend: scrubEvent`, `beforeSendTransaction: scrubEvent` и `beforeBreadcrumb: scrubBreadcrumb`.
+Если сервер завёл Sentry сам, кит чистит только свои события, процессором на копии scope. Для остальных подключите в своём `Sentry.init` `beforeSend: scrubEvent`, `beforeSendSpan: scrubSpan` и `beforeBreadcrumb: scrubBreadcrumb`. SDK 11 по умолчанию шлёт спаны потоком и `beforeSendTransaction` не вызывает. С `traceLifecycle: 'static'` спаны едут внутри транзакции, тогда вместо `beforeSendSpan` нужен `beforeSendTransaction: scrubEvent`.
 
 ## HTTP и OAuth
 

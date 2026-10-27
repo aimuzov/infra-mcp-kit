@@ -120,7 +120,10 @@ test('адрес страницы ошибки: текст в query, сообщ�
 })
 
 test('контекст входа из фрагмента и колбэк с запросом для виджета', () => {
-	const context = readLoginContext('#request=r.1&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&dev=7')
+	// Бота из фрагмента страница не берёт: его подставит кто угодно.
+	const context = readLoginContext(
+		'#request=r.1&callback=%2Fauthorize%2Fcallback&client=Claude&host=claude.ai&dev=7&bot=evil_bot',
+	)
 
 	assert.deepEqual(context, {
 		request: 'r.1',
@@ -129,6 +132,7 @@ test('контекст входа из фрагмента и колбэк с з�
 		host: 'claude.ai',
 		error: '',
 		dev: '7',
+		hide: [],
 	})
 
 	assert.equal(callbackUrl(context, 'https://a.b').href, 'https://a.b/authorize/callback?request=r.1')

@@ -14,6 +14,7 @@ export {
 	CALLBACK_PATH,
 	KitOAuthProvider,
 	LoginError,
+	PAGE_DATA_PATH,
 	type AuthorizationParams,
 	type Grant,
 	type Login,

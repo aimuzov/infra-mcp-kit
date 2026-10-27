@@ -1,0 +1,124 @@
+---
+// Карточка лендинга: заголовок, абзац, своё содержимое слотом и ряд ссылок-кнопок. Из неё
+// лендинг собирает `landing.cards` конфига, её же берёт сервис в слоты `landing.astro`.
+import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
+import Card from '@aimuzov/infra-site-kit/ui/card.svelte'
+
+import { landingHref } from '@aimuzov/infra-mcp-kit/astro'
+
+type Props = {
+	/** Тексты уже на языке страницы: `own(locale, key, value)` или `pt(locale, key)`. */
+	title: string
+	text?: string
+	links?: Array<{ href: string; label: string; primary?: boolean }>
+	/** Имя в `data-card`: по нему карточку находят стили сервиса и тесты. */
+	id?: string
+}
+
+const { title, text, links = [], id } = Astro.props
+const locale = localeOfPath(Astro.url.pathname)
+const external = (href: string) => /^https?:\/\//i.test(href)
+---
+
+<!-- `data-card` на обёртке: Card из site-kit своих атрибутов не принимает. -->
+<div data-card={id}>
+	<Card>
+		<h2 class="section-title">{title}</h2>
+		{text && <p class="muted">{text}</p>}
+		<slot />
+		{links.length > 0 && (
+			<div class="landing-card__links">
+				{links.map(({ href, label, primary }) => (
+					<a
+						class:list={['landing-card__link', primary && 'landing-card__link--primary']}
+						href={landingHref(href, locale)}
+						target={external(href) ? '_blank' : undefined}
+						rel={external(href) ? 'noopener' : undefined}
+					>
+						{label}
+						{external(href) && (
+							<svg
+								class="landing-card__out"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M7 7h10v10" />
+								<path d="M7 17 17 7" />
+							</svg>
+						)}
+					</a>
+				))}
+			</div>
+		)}
+	</Card>
+</div>
+
+<style>
+	.landing-card__links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	/* Ссылки в виде кнопок site-kit: это переходы, а `Button` рисует только `<button>`. */
+	.landing-card__link {
+		display: inline-flex;
+		gap: 6px;
+		align-items: center;
+		justify-content: center;
+		height: 2.5rem;
+		padding: 0 1rem;
+		border: 1px solid var(--ui-border);
+		border-radius: var(--ui-radius-sm);
+		font-weight: 500;
+		color: var(--ui-fg);
+		text-decoration: none;
+		background: var(--ui-bg);
+		transition:
+			background-color 0.15s,
+			box-shadow 0.15s;
+
+		&:hover {
+			color: var(--ui-fg);
+			background: var(--ui-surface);
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			transition: none;
+		}
+	}
+
+	/* Главная -- с расслоением, как `.button--primary` в "Сигнале". */
+	.landing-card__link--primary {
+		border-color: transparent;
+		color: var(--ui-primary-fg);
+		background: var(--ui-primary);
+		box-shadow:
+			-2px 0 0 var(--signal-glitch-a, var(--signal-red)),
+			2px 0 0 var(--signal-glitch-b, var(--signal-cyan));
+
+		&:hover {
+			color: var(--ui-primary-fg);
+			background: color-mix(in srgb, var(--ui-primary) 88%, black);
+			box-shadow:
+				-3px 0 0 var(--signal-glitch-a, var(--signal-red)),
+				3px 0 0 var(--signal-glitch-b, var(--signal-cyan));
+		}
+	}
+
+	.landing-card__out {
+		flex: none;
+		width: 14px;
+		height: 14px;
+		color: var(--signal-hue);
+	}
+
+	.landing-card__link--primary .landing-card__out {
+		color: inherit;
+	}
+</style>

@@ -1,4 +1,5 @@
 ---
+import { pick, type Localized } from '@aimuzov/infra-mcp-kit/i18n'
 import { localeOfPath } from '@aimuzov/infra-site-kit/i18n.js'
 import config from 'virtual:infra-mcp-kit/pages'
 
@@ -11,16 +12,20 @@ const { service, tokenForm } = config
 if (!tokenForm) throw new Error('Страница /login без `tokenForm` в mcpPages')
 
 const locale = localeOfPath(Astro.url.pathname)
+// Текст по языкам из конфига, а перевод по ключу в `service.strings` сильнее: так работали
+// конфиги со строками до `{ ru, en }`.
+const text = (key: string, value: Localized | undefined) => own(locale, key, pick(value, locale))
+
 // Тексты формы уходят в остров уже на языке страницы: словарь сервиса ему не нужен.
 const form = {
-	title: own(locale, 'tokenForm.title', tokenForm.title),
-	lead: own(locale, 'tokenForm.lead', tokenForm.lead),
-	submit: own(locale, 'tokenForm.submit', tokenForm.submit) ?? pt(locale, 'login.submit'),
+	title: text('tokenForm.title', tokenForm.title) ?? '',
+	lead: text('tokenForm.lead', tokenForm.lead),
+	submit: text('tokenForm.submit', tokenForm.submit) ?? pt(locale, 'login.submit'),
 	fields: tokenForm.fields.map((field) => ({
 		...field,
-		label: own(locale, `field.${field.name}.label`, field.label),
-		placeholder: own(locale, `field.${field.name}.placeholder`, field.placeholder),
-		hint: own(locale, `field.${field.name}.hint`, field.hint),
+		label: text(`field.${field.name}.label`, field.label) ?? field.name,
+		placeholder: text(`field.${field.name}.placeholder`, field.placeholder),
+		hint: text(`field.${field.name}.hint`, field.hint),
 	})),
 }
 ---

@@ -1,9 +1,14 @@
 import { readFileSync } from 'node:fs'
 import type { AstroIntegration } from 'astro'
 
+import { checkLanding, type PagesLanding } from '#kit/astro/landing'
 import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
+import { checkTokenFields, type TokenForm } from '#kit/token-form'
 
-export type { Locale, Strings } from '#kit/i18n'
+import { assertSiteKit, siteKitVersion } from './site-kit.ts'
+
+export type { Locale, Localized, Strings } from '#kit/i18n'
+export { defineTokenForm, type TokenForm, type TokenFormField } from '#kit/token-form'
 
 /** Что знают страницы кита о сервисе на сборке. */
 export type PagesService = {
@@ -43,6 +48,7 @@ export type PagesTool = {
 	icon?: string
 }
 
+/** Поле, как его получает остров формы: тексты уже на языке страницы. */
 export type TokenField = {
 	name: string
 	label: string
@@ -53,12 +59,27 @@ export type TokenField = {
 	required?: boolean
 }
 
+export type TelegramPages = {
+	/**
+	 * Имя бота для `/login/telegram` на случай, если сервер его не прислал. `/account/signin`
+	 * берёт бота только из `/account/auth`. Страницы обычно собирают без окружения прода,
+	 * поэтому имя лучше отдать в рантайме: `telegramLogin({ botName })` и `telegramAccount`.
+	 */
+	botName?: string
+	grants?: string[]
+	/** Страница `/account/signin`: вход в кабинет через Telegram. Сервер берёт `telegramAccount`. */
+	account?: boolean
+}
+
 export type McpPagesOptions = {
 	service: PagesService
-	/** Вход по токен-форме, страница `/login`. Сервер берёт `tokenFormLogin`. */
-	tokenForm?: { title: string; lead?: string; fields: TokenField[]; submit?: string }
+	/**
+	 * Вход по токен-форме, страница `/login`. Сервер берёт `tokenFormLogin` с теми же полями:
+	 * общий модуль с `defineTokenForm` даёт их обоим.
+	 */
+	tokenForm?: TokenForm
 	/** Вход через Telegram, страница `/login/telegram`. Сервер берёт `telegramLogin`. */
-	telegram?: { botName: string; grants?: string[] }
+	telegram?: TelegramPages
 	/** Страницы кита, которые сервис рисует сам, например свой лендинг. */
 	override?: Array<'index' | 'error' | '404'>
 	/**
@@ -66,7 +87,14 @@ export type McpPagesOptions = {
 	 * под `/en/`, ставит переключатель и `hreflang`, а сервер подбирает язык по `Accept-Language`.
 	 */
 	locales?: Locale[]
+	/**
+	 * Свои карточки лендинга: заголовок, абзац и ссылки после героя, "Подключить" или
+	 * инструментов. Что в карточку не влезает, идёт в слоты `astro/landing.astro` на своей `index`.
+	 */
+	landing?: PagesLanding
 }
+
+export { landingHref, type LandingPlace, type PagesCard, type PagesLanding, type PagesLink } from '#kit/astro/landing'
 
 export const VIRTUAL_MODULE = 'virtual:infra-mcp-kit/pages'
 
@@ -120,14 +148,21 @@ export function serviceCss(service: PagesService): string {
  */
 export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	const skip = new Set(options.override ?? [])
+	const locales = options.locales ?? [DEFAULT_LOCALE]
+
+	checkLanding(options.landing, options.service.strings, locales)
 
 	// Плохой цвет роняет сборку сразу, а не при первой загрузке стилей.
 	serviceCss(options.service)
 
+	if (options.tokenForm) checkTokenFields(options.tokenForm.fields)
+
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+			'astro:config:setup': ({ config, injectRoute, updateConfig, logger }) => {
+				assertSiteKit(siteKitVersion(), logger)
+
 				const { logo } = options.service
 				const resolved: McpPagesOptions = logo
 					? {
@@ -143,11 +178,10 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 					['/', 'index.astro', !skip.has('index')],
 					['/login', 'login.astro', Boolean(options.tokenForm)],
 					['/login/telegram', 'telegram.astro', Boolean(options.telegram)],
+					['/account/signin', 'account-signin.astro', Boolean(options.telegram?.account)],
 					['/error', 'error.astro', !skip.has('error')],
 					['/404', '404.astro', !skip.has('404')],
 				]
-
-				const locales = options.locales ?? [DEFAULT_LOCALE]
 
 				for (const locale of locales) {
 					const prefix = locale === DEFAULT_LOCALE ? '' : `/${locale}`

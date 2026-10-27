@@ -5,6 +5,7 @@ import { kt, requestLocale, type Locale } from '#kit/i18n'
 import { log, type Logger } from '#kit/log'
 import type { AuthInfo } from '#kit/mcp'
 import { messageOf } from '#kit/results'
+import { captureError } from '#kit/sentry'
 
 import {
 	InvalidClientError,
@@ -17,7 +18,7 @@ import {
 	UnsupportedGrantTypeError,
 	type OAuthClient,
 } from './errors.ts'
-import { CALLBACK_PATH, KitOAuthProvider, LoginError, type ProviderOptions } from './provider.ts'
+import { CALLBACK_PATH, KitOAuthProvider, LoginError, PAGE_DATA_PATH, type ProviderOptions } from './provider.ts'
 
 export type OAuthOptions = ProviderOptions & {
 	mcpUrl: URL
@@ -287,6 +288,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		} catch (error) {
 			if (!(error instanceof LoginError)) {
 				logger.error('login failed', { message: messageOf(error) })
+				captureError(error, { 'http.path': CALLBACK_PATH })
 
 				return fail(locale, kt(locale, 'oauth.failed'), kt(locale, 'server.later'))
 			}
@@ -304,6 +306,8 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		'/authorize': authorize,
 		'/token': token,
 		'/revoke': revoke,
+		[PAGE_DATA_PATH]: async (request) =>
+			request.method === 'GET' ? json(login.pageData ?? {}) : methodNotAllowed('GET'),
 	}
 
 	async function handle(request: Request): Promise<Response | undefined> {
@@ -326,6 +330,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 			if (error instanceof OAuthError) return cors(noStore(json(error.toJSON(), error.status)))
 
 			logger.error('oauth request failed', { path: pathname, message: messageOf(error) })
+			captureError(error, { 'http.path': pathname })
 
 			return cors(json({ error: 'server_error', error_description: 'Internal error' }, 500))
 		}

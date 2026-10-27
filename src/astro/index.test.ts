@@ -61,6 +61,25 @@ test('интеграция: без знака и цветов страниц и 
 	)
 })
 
+test('интеграция: вход в кабинет через Telegram -- своя страница на всех языках, бот со сборки не нужен', () => {
+	const { routes, load } = setup({ service: { name: 'x' }, telegram: { account: true }, locales: ['ru', 'en'] })
+
+	assert.deepEqual(routes, [
+		'/',
+		'/login/telegram',
+		'/account/signin',
+		'/error',
+		'/404',
+		'/en',
+		'/en/login/telegram',
+		'/en/account/signin',
+		'/en/error',
+		'/en/404',
+	])
+
+	assert.doesNotMatch(load(VIRTUAL_MODULE) ?? '', /botName/)
+})
+
 const MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle r="12" fill="#f11f24"/></svg>'
 
 test('знак сервиса: статичный SVG проходит, XML-заголовок отрезается', () => {

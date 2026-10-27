@@ -88,7 +88,7 @@ export async function startHttp(
  * В каждой странице только её имя, по нему тест видит, что отдал сервер.
  */
 export function fakePages(dir = mkdtempSync(join(tmpdir(), 'mcp-pages-'))): string {
-	for (const name of ['index', 'login', 'login/telegram', 'error', '404']) {
+	for (const name of ['index', 'login', 'login/telegram', 'account/signin', 'error', '404']) {
 		mkdirSync(dirname(join(dir, name)), { recursive: true })
 		writeFileSync(join(dir, `${name}.html`), `<!doctype html><title>${name}</title>page:${name}\n`)
 	}
@@ -111,6 +111,8 @@ export type LoginStep = {
 	host: string
 	error: string
 	dev: string
+	/** Поля формы, которые сервер спрятал: `hide` у `tokenFormLogin`. */
+	hide: string[]
 	/** Остальные ключи фрагмента: то, что сервис положил в `Login.context`. */
 	context: Record<string, string>
 }
@@ -144,7 +146,7 @@ export function loginStep(location: string, base: string): LoginStep {
 
 	assert.ok(get('request'), `в адресе входа нет запроса: ${location}`)
 
-	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev'])
+	const own = new Set(['request', 'callback', 'client', 'host', 'error', 'dev', 'hide'])
 	const context = Object.fromEntries([...hash].filter(([key]) => !own.has(key)))
 
 	return {
@@ -155,6 +157,7 @@ export function loginStep(location: string, base: string): LoginStep {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
+		hide: get('hide').split(',').filter(Boolean),
 		context,
 	}
 }
@@ -170,11 +173,29 @@ export function submitForm(fields: Record<string, string>) {
 		})
 }
 
+// Те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. Поэтому у каждой
+// подписи своя секунда, от текущей назад: в 10 минут свежести их хватит на любой тест.
+const authDates = new Set<number>()
+
+/**
+ * Подписать вход, как его вернёт виджет, со своей `auth_date`: два вызова не дают одну подпись,
+ * даже для одного человека в одну секунду. `auth_date` из `user` заменяет выбранную.
+ */
+export function freshTelegramLogin(user: Record<string, string>, botToken: string): Record<string, string> {
+	let date = Math.floor(Date.now() / 1000)
+
+	while (authDates.has(date)) date--
+
+	authDates.add(date)
+
+	return signTelegramLogin({ auth_date: String(date), ...user }, botToken)
+}
+
 /** Вход через Telegram: GET на колбэк с подписанным query, как вернёт виджет. */
 export function telegramSigned(user: Record<string, string>, botToken: string) {
 	return (step: LoginStep) => {
 		const url = new URL(step.callback)
-		const signed = signTelegramLogin({ auth_date: String(Math.floor(Date.now() / 1000)), ...user }, botToken)
+		const signed = freshTelegramLogin(user, botToken)
 
 		url.searchParams.set('request', step.request)
 
@@ -194,6 +215,52 @@ export function devLink() {
 
 		return fetch(url, { redirect: 'manual' })
 	}
+}
+
+export type AccountLoginResult = {
+	/** Ответ `/account/login`: редирект в кабинет или на страницу ошибки. */
+	response: Response
+	/** Заголовок `Cookie` с сессией кабинета, пустой, если вход не удался. */
+	cookie: string
+}
+
+/**
+ * Вход в кабинет через `telegramAccount`, как его пройдёт человек: страница входа берёт
+ * `/account/auth` с меткой и cookie, виджет возвращает на `/account/login` с подписью.
+ * `'dev'` -- dev-ссылка на localhost. Каждый вызов подписывает вход заново.
+ */
+export async function accountLogin(
+	base: string,
+	login: { user: Record<string, string>; botToken: string } | 'dev',
+	path = '/account/login',
+): Promise<AccountLoginResult> {
+	const auth = await fetch(new URL('/account/auth', base))
+
+	assert.equal(auth.status, 200, await auth.clone().text())
+
+	const { state } = (await auth.json()) as { state: string }
+	const url = new URL(path, base)
+
+	url.searchParams.set('state', state)
+
+	if (login === 'dev') url.searchParams.set('dev', '1')
+	else {
+		const signed = freshTelegramLogin(login.user, login.botToken)
+
+		for (const [key, value] of Object.entries(signed)) url.searchParams.set(key, value)
+	}
+
+	const response = await fetch(url, { redirect: 'manual', headers: { cookie: cookiesOf(auth).join('; ') } })
+	const cookie = cookiesOf(response)
+		.filter((pair) => !pair.endsWith('='))
+		.join('; ')
+
+	return { response, cookie }
+}
+
+/** Пары `name=value` из `Set-Cookie` ответа. */
+function cookiesOf(response: Response): string[] {
+	return response.headers.getSetCookie().map((line) => line.split(';')[0] ?? '')
 }
 
 /** Регистрация клиента, authorize, вход, колбэк и обмен кода на токены, как это делает Claude. */

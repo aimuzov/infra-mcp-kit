@@ -19,6 +19,7 @@ import {
 import { log as defaultLog, type Logger } from '#kit/log'
 import type { AuthInfo, McpServer } from '#kit/mcp'
 import { messageOf } from '#kit/results'
+import { captureError } from '#kit/sentry'
 
 import type { HttpConfig } from './config.ts'
 import { apiError, errorPage } from './json.ts'
@@ -65,8 +66,12 @@ export type HttpAppOptions = {
 	 * статическая страница, поэтому с `auth` нужен и `publicDir`.
 	 */
 	auth?: HttpAuthOptions
-	/** Свои маршруты, например API кабинета. Идут после OAuth, `/mcp` и страниц, до 404. */
-	routes?: Route
+	/**
+	 * Свои маршруты, например API кабинета. Идут после OAuth, `/mcp` и страниц, до 404.
+	 * Несколько -- по порядку, отвечает первый, кто вернул `Response`: так рядом встают
+	 * готовые маршруты кита, например `telegramAccount`.
+	 */
+	routes?: Route | Route[]
 	/** Куда писать ошибки `/mcp` и входа. По умолчанию общий `log` кита. */
 	logger?: Logger
 	/**
@@ -121,6 +126,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			? auth.tokens
 			: new Tokens({ secret: config.authSecret, issuer: config.publicUrl.href, mode: auth?.tokens ?? 'sign' })
 	const context: HttpContext = { config, service, mcpUrl, tokens, logger }
+	const ownRoutes = [options.routes ?? []].flat()
 
 	// Английские страницы mcpPages кладёт в `en/`: нет каталога -- сервер говорит только по-русски.
 	if (publicDir) enableLocales(existsSync(join(publicDir, 'en')) ? ['ru', 'en'] : ['ru'])
@@ -204,9 +210,11 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			if (page) return page
 		}
 
-		const own = await options.routes?.(request, context)
+		for (const own of ownRoutes) {
+			const response = await own(request, context)
 
-		if (own) return own
+			if (response) return response
+		}
 
 		if (publicDir && wantsPage(request)) {
 			const locale = localeOfPath(pathname)
@@ -229,6 +237,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			const { pathname } = new URL(request.url)
 
 			logger.error('request failed', { path: pathname, message: messageOf(error) })
+			captureError(error, { 'http.path': pathname })
 
 			if (pathname === '/mcp') response = Response.json(INTERNAL_ERROR, { status: 500 })
 			else if (publicDir && wantsPage(request)) {
@@ -261,6 +270,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			.then((response) => send(res, response))
 			.catch((error) => {
 				logger.error('response failed', { message: messageOf(error) })
+				captureError(error)
 
 				if (!res.headersSent) res.writeHead(500)
 
@@ -323,6 +333,7 @@ async function respondMcp(
 				)
 			} catch (error) {
 				logger.error('mcp request failed', { message: messageOf(error) })
+				captureError(error, { 'http.path': '/mcp' })
 				write(INTERNAL_ERROR)
 			} finally {
 				await server.close()

@@ -45,56 +45,29 @@ export function hostCookie(name: string, publicUrl: URL): { name: string; attrib
 	}
 }
 
-/** Помечает сессии под `__Host-` cookie: старое имя без префикса их не примет. */
-const HOST_CLAIM = 'host_cookie'
-
 /**
  * Cookie кабинета: подписанный токен `session`, HttpOnly и SameSite=Lax,
  * на https -- `__Host-<cookie>` (см. `hostCookie`).
  *
- * Сессии, выданные до префикса, живут под прежним `<cookie>`, и `read` берёт
- * их оттуда, пока нет `__Host-` cookie. Только их: новую сессию под старым
- * именем мог подложить соседний поддомен, поэтому у новых есть claim,
- * которого нет у старых.
- *
- * Старую подложить всё ещё можно: от своей сервер её не отличит. Окно
- * закрывается само. На https `cookie` всегда ставит claim, поэтому через
- * `ttl.session` после обновления старых сессий не остаётся, если сервис
- * не подписывает `session` в обход `sessions`.
+ * На https `read` берёт сессию только из `__Host-<cookie>`. Cookie без
+ * префикса мог поставить соседний поддомен, поэтому она не читается, даже
+ * выданная до префикса: после обновления такие люди входят заново.
  */
 export function sessions(tokens: Tokens, publicUrl: URL, cookie = 'mcp_session'): Sessions {
 	const { name, attributes } = hostCookie(cookie, publicUrl)
-	const prefixed = name !== cookie
 
 	return {
 		async read(request) {
 			const token = readCookie(request, name)
 
-			if (token !== undefined || !prefixed) {
-				const claims = token ? await tokens.verify('session', token) : null
-
-				if (claims) delete claims[HOST_CLAIM]
-
-				return claims
-			}
-
-			const legacy = readCookie(request, cookie)
-			const claims = legacy ? await tokens.verify('session', legacy) : null
-
-			return claims && !(HOST_CLAIM in claims) ? claims : null
+			return token ? tokens.verify('session', token) : null
 		},
 		async cookie(claims) {
-			const token = await tokens.sign('session', prefixed ? { ...claims, [HOST_CLAIM]: true } : claims)
+			const token = await tokens.sign('session', claims)
 
 			return `${name}=${encodeURIComponent(token)}; Max-Age=${tokens.ttl.session}; ${attributes}`
 		},
-		// Старую cookie без префикса тем же заголовком не стереть. Поэтому на https
-		// остаётся пустая `__Host-` cookie: пока она есть, старое имя не читается,
-		// а живёт она дольше любой старой сессии.
-		clearCookie: () =>
-			prefixed
-				? `${name}=; Max-Age=${tokens.ttl.session}; ${attributes}`
-				: `${name}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
+		clearCookie: () => `${name}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${attributes}`,
 	}
 }
 

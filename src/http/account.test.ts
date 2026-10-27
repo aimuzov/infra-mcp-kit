@@ -148,29 +148,20 @@ describe('кабинет за https: __Host- cookie', () => {
 		assert.equal((await read(`thinks_session=${stranger}; __Host-thinks_session=${mine}`))?.sub, 'me')
 	})
 
-	test('сессия, выданная до префикса, живёт под старым именем до выхода', async () => {
-		// Так подписывал старый кит: без claim новой cookie.
+	test('сессия, выданная до префикса, под старым именем не годится: человек входит заново', async () => {
+		// Так подписывал старый кит, и cookie без префикса ещё лежит в браузере.
 		const legacy = encodeURIComponent(await tokens.sign('session', { sub: 'old' }))
 		const fresh = valueOf(await cabinet.cookie({ sub: 'new' }))
 
-		assert.equal((await read(`thinks_session=${legacy}`))?.sub, 'old')
+		assert.equal(await read(`thinks_session=${legacy}`), null)
 		assert.equal((await read(`thinks_session=${legacy}; __Host-thinks_session=${fresh}`))?.sub, 'new')
-
-		const clear = cabinet.clearCookie()
-
-		// После выхода старая cookie ещё в браузере, но пустая __Host- закрывает к ней дорогу.
-		assert.equal(
-			clear,
-			`__Host-thinks_session=; Max-Age=${tokens.ttl.session}; Path=/; HttpOnly; SameSite=Lax; Secure`,
-		)
-
-		assert.equal(await read(`thinks_session=${legacy}; __Host-thinks_session=`), null)
 	})
 
-	test('claim новой cookie не виден сервису', async () => {
-		const claims = await read(`__Host-thinks_session=${valueOf(await cabinet.cookie({ sub: 'me', name: 'Ivan' }))}`)
-
-		assert.deepEqual(Object.keys(claims ?? {}).sort(), ['exp', 'iat', 'iss', 'kind', 'name', 'sub'])
+	test('выход стирает __Host- cookie', () => {
+		assert.equal(
+			cabinet.clearCookie(),
+			'__Host-thinks_session=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; HttpOnly; SameSite=Lax; Secure',
+		)
 	})
 })
 

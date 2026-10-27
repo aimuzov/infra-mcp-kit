@@ -108,7 +108,7 @@ For the account page: `sessions(tokens, publicUrl)` gives a signed httpOnly cook
 
 Over https the sign-in cookies carry the `__Host-` prefix, a custom session name too. The browser accepts such a cookie only from the host itself, so a sibling subdomain cannot plant its own session or sign-in state through the shared parent domain. On http localhost the names have no prefix.
 
-A session issued before the prefix is still read by `sessions` under its old name until it expires or the person logs out. A new one under the old name is refused. An old one can still be planted, though: until the sessions issued before the update expire, a sibling subdomain can put someone's old session into a browser with no prefixed cookie. That is at most `ttl.session` after the update, a week by default.
+Over https `sessions` does not read a session issued before the prefix: anyone could have planted a cookie without it. So after the update everyone who signed in before it signs in again.
 
 ### Telegram
 

@@ -190,6 +190,22 @@ describe('sentry', () => {
 		)
 	})
 
+	test('брошенный не Error уходит заменой, без своего содержимого', async () => {
+		const thrown = { note: SECRET_ARG }
+
+		captureError(thrown)
+		captureError(thrown)
+		captureError('plain text')
+
+		const [object, string, ...rest] = await events()
+
+		assert.equal(rest.length, 0, 'тот же объект уходит один раз')
+
+		assert.equal(object?.exception?.values[0]?.value, 'Non-Error thrown: object')
+		assert.equal(string?.exception?.values[0]?.value, 'plain text')
+		assert.ok(!sent[0]!.raw.includes(SECRET_ARG))
+	})
+
 	// Сервер вроде kaiten-mcp зовёт `Sentry.init` из своего `@sentry/node` до `runCli`. Его ядро
 	// другой версии, и состояние SDK лежит под другим ключом `__SENTRY__`: так и эмулируем.
 	test('если сервер уже завёл Sentry, кит шлёт через его клиент и не заводит второй', async () => {
@@ -255,6 +271,11 @@ describe('sentry', () => {
 	for (const [kind, crash] of [
 		['исключение', "setTimeout(() => { throw new Error('crashed') })"],
 		['отклонение промиса', "Promise.reject(new Error('crashed'))"],
+		// Уже отправленная ошибка, которую потом бросили: падение всё равно уходит своим событием.
+		[
+			'исключение, отправленное раньше',
+			"const e = new Error('crashed'); captureError(e); setTimeout(() => { throw e })",
+		],
 	]) {
 		test(`необработанное ${kind} уходит по сети до выхода с кодом 1`, async () => {
 			const bodies: string[] = []
@@ -274,7 +295,7 @@ describe('sentry', () => {
 
 			const { port } = ingest.address() as AddressInfo
 			const script = [
-				`const { initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
+				`const { captureError, initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
 				"await initSentry({ name: 'crash-test', version: '0.0.1' })",
 				crash,
 			].join('\n')
@@ -296,7 +317,7 @@ describe('sentry', () => {
 			const event = bodies
 				.flatMap((body) => body.split('\n'))
 				.map((line) => JSON.parse(line) as Event)
-				.find((item) => item.exception)
+				.find((item) => item.tags?.fatal)
 
 			assert.equal(event?.release, 'crash-test@0.0.1')
 			assert.equal(event?.tags?.fatal, 'true')

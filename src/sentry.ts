@@ -34,7 +34,6 @@ export type SentryOptions = {
 
 let reporter: Reporter | undefined
 const tagged = new AsyncLocalStorage<Tags>()
-const captured = new WeakSet<object>()
 
 /**
  * Включить отчёты об ошибках, если задан `SENTRY_DSN`; без него SDK даже не загружается.
@@ -153,25 +152,49 @@ async function fatal(error: unknown) {
 	if (dying) return
 
 	dying = true
-	captureError(error, { fatal: 'true' })
+	// Копия: отправленную раньше ошибку Sentry помечает и второй раз не шлёт, а падение процесса --
+	// отдельное событие.
+	send(error instanceof Error ? copyOf(error) : error, { fatal: 'true' })
 	await flushSentry()
 	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
 	process.exit(1)
 }
 
-/** Отправить ошибку, которую кит поймал и превратил в ответ. Без Sentry ничего не делает. */
+const copyOf = (error: Error) =>
+	Object.assign(new Error(error.message, { cause: error.cause }), { name: error.name, stack: error.stack })
+
+/**
+ * Отправить ошибку, которую кит поймал и превратил в ответ. Без Sentry ничего не делает.
+ * Одну ошибку могут поймать двое, например обработчик и HTTP-слой над ним: тот же объект
+ * Sentry второй раз не шлёт, а разные случаи с одинаковым стеком уходят каждый.
+ */
 export function captureError(error: unknown, tags?: Tags): void {
-	if (!reporter) return
+	send(error, tags)
+}
 
-	// Одну ошибку могут поймать двое, например обработчик и HTTP-слой над ним. `dedupeIntegration`
-	// тут не годится: он склеивает и разные случаи подряд с одинаковым стеком.
-	if (error !== null && typeof error === 'object') {
-		if (captured.has(error)) return
+function send(error: unknown, tags?: Tags) {
+	reporter?.capture(safe(error), { ...tagged.getStore(), ...tags })
+}
 
-		captured.add(error)
-	}
+const replaced = new WeakMap<object, Error>()
 
-	reporter.capture(error, { ...tagged.getStore(), ...tags })
+/**
+ * Не `Error` уходит заменой: брошенный объект Sentry кладёт в событие целиком, а в нём
+ * бывают аргументы инструмента. Строку оставляем, это тот же текст ошибки. Замена
+ * для объекта одна и та же, чтобы повтор узнавался, как у `Error`.
+ */
+function safe(error: unknown): Error {
+	if (error instanceof Error) return error
+
+	if (typeof error === 'string') return new Error(error)
+
+	const replacement = new Error(`Non-Error thrown: ${error === null ? 'null' : typeof error}`)
+
+	if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return replacement
+
+	if (!replaced.has(error)) replaced.set(error, replacement)
+
+	return replaced.get(error)!
 }
 
 /**

@@ -123,28 +123,29 @@ export function telegramUser(
 	return verifyTelegramLogin(query, botToken)
 }
 
+/** Потраченные подписи виджета и когда их можно забыть. */
+const spent = new Map<string, number>()
+
 /**
- * Подписанный query из истории браузера иначе годился бы на чужой вход до `MAX_AGE_SECONDS`.
- * Отдаёт `false` на уже потраченную подпись. Память процесса: после рестарта окно повтора
- * то же, что и без этой проверки.
+ * Потратить подпись виджета: `false`, если её уже тратили. Подписанный query из истории
+ * браузера иначе годился бы на чужой вход до `MAX_AGE_SECONDS`.
+ *
+ * Журнал один на процесс, а не на вход: виджет подписывает только человека и время, так что
+ * подпись из OAuth-входа годится и в кабинет, и наоборот. Подписи разных ботов не совпадают.
+ * Память процесса: после рестарта окно повтора то же, что и без этой проверки.
  */
-export function replayGuard(): (hash: string, now?: number) => boolean {
-	const used = new Map<string, number>()
+export function spendSignature(hash: string, now = Date.now()): boolean {
+	for (const [key, expiresAt] of spent) if (expiresAt < now) spent.delete(key)
 
-	return (hash, now = Date.now()) => {
-		for (const [key, expiresAt] of used) if (expiresAt < now) used.delete(key)
+	if (spent.has(hash)) return false
 
-		if (used.has(hash)) return false
+	spent.set(hash, now + MAX_AGE_SECONDS * 1000)
 
-		used.set(hash, now + MAX_AGE_SECONDS * 1000)
-
-		return true
-	}
+	return true
 }
 
 /** Вход через Telegram Login Widget: виджет возвращает человека GET-ссылкой с подписанным query. */
 export function telegramLogin(options: TelegramLoginOptions): Login {
-	const spend = replayGuard()
 	const context: Record<string, string> = {}
 
 	// Страница собрана без окружения рантайма: имя бота она берёт из фрагмента, а на localhost
@@ -163,7 +164,7 @@ export function telegramLogin(options: TelegramLoginOptions): Login {
 
 			const hash = query.hash ?? ''
 
-			if (hash && !spend(hash)) throw new LoginError(allLocales('login.linkUsed'))
+			if (hash && !spendSignature(hash)) throw new LoginError(allLocales('login.linkUsed'))
 
 			return { subject: user.id, claims: options.claims?.(user) }
 		},

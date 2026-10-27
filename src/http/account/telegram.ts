@@ -5,7 +5,7 @@ import { isLoopback } from '#kit/http/config'
 import { errorPage, sendJson } from '#kit/http/json'
 import {
 	MAX_AGE_SECONDS,
-	replayGuard,
+	spendSignature,
 	telegramUser,
 	type TelegramConfig,
 	type TelegramUser,
@@ -60,7 +60,6 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 		throw new Error('telegramAccount: нужны botToken и botName, без них -- только devUserId на localhost')
 	}
 
-	const spend = replayGuard()
 	const claimsOf = (user: TelegramUser) =>
 		ownClaims(options.claims?.(user) ?? { name: user.firstName || user.username })
 	let session = options.sessions
@@ -104,7 +103,7 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 			if (!user) return fail('account.signinAgain')
 
-			if (query.hash && !spend(query.hash)) return fail('login.linkUsed')
+			if (query.hash && !spendSignature(query.hash)) return fail('login.linkUsed')
 
 			const response = redirect(
 				localizePath(home, locale),

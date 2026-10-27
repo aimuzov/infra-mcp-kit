@@ -170,11 +170,29 @@ export function submitForm(fields: Record<string, string>) {
 		})
 }
 
+// Те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. Поэтому у каждой
+// подписи своя секунда, от текущей назад: в 10 минут свежести их хватит на любой тест.
+const authDates = new Set<number>()
+
+/**
+ * Подписать вход, как его вернёт виджет, со своей `auth_date`: два вызова не дают одну подпись,
+ * даже для одного человека в одну секунду. `auth_date` из `user` заменяет выбранную.
+ */
+export function freshTelegramLogin(user: Record<string, string>, botToken: string): Record<string, string> {
+	let date = Math.floor(Date.now() / 1000)
+
+	while (authDates.has(date)) date--
+
+	authDates.add(date)
+
+	return signTelegramLogin({ auth_date: String(date), ...user }, botToken)
+}
+
 /** Вход через Telegram: GET на колбэк с подписанным query, как вернёт виджет. */
 export function telegramSigned(user: Record<string, string>, botToken: string) {
 	return (step: LoginStep) => {
 		const url = new URL(step.callback)
-		const signed = signTelegramLogin({ auth_date: String(Math.floor(Date.now() / 1000)), ...user }, botToken)
+		const signed = freshTelegramLogin(user, botToken)
 
 		url.searchParams.set('request', step.request)
 
@@ -203,9 +221,6 @@ export type AccountLoginResult = {
 	cookie: string
 }
 
-// Подпись с той же секундой и теми же полями совпала бы с прошлой, и кит принял бы её за повтор.
-let signins = 0
-
 /**
  * Вход в кабинет через `telegramAccount`, как его пройдёт человек: страница входа берёт
  * `/account/auth` с меткой и cookie, виджет возвращает на `/account/login` с подписью.
@@ -227,8 +242,7 @@ export async function accountLogin(
 
 	if (login === 'dev') url.searchParams.set('dev', '1')
 	else {
-		const authDate = Math.floor(Date.now() / 1000) - (signins++ % 300)
-		const signed = signTelegramLogin({ auth_date: String(authDate), ...login.user }, login.botToken)
+		const signed = freshTelegramLogin(login.user, login.botToken)
 
 		for (const [key, value] of Object.entries(signed)) url.searchParams.set(key, value)
 	}

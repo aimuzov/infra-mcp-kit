@@ -15,6 +15,7 @@ import {
 	accountLogin,
 	connectHttp,
 	fakePages,
+	freshTelegramLogin,
 	oauthFlow,
 	signTelegramLogin,
 	startHttp,
@@ -73,7 +74,7 @@ async function signed(base: string, user = IVAN) {
 	const cookie = (auth.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
 	const { state: label } = (await auth.json()) as { state: string }
 	const url = new URL('/account/login', base)
-	const fields = signTelegramLogin({ auth_date: String(Math.floor(Date.now() / 1000)), ...user }, BOT)
+	const fields = freshTelegramLogin(user, BOT)
 
 	for (const [key, value] of Object.entries({ ...fields, state: label })) url.searchParams.set(key, value)
 
@@ -307,6 +308,66 @@ describe('свои сессии сервиса', () => {
 		})
 
 		assert.match(logout.headers.get('set-cookie') ?? '', /^thinks_session=;/)
+	})
+})
+
+describe('одна подпись на OAuth-вход и кабинет', () => {
+	/** Сервис, где Telegram пускает и в OAuth, и в кабинет, как в README. */
+	async function both() {
+		const telegram = { botToken: BOT, botName: 'test_bot' }
+		const http = await startHttp((base) =>
+			createHttpApp({
+				config: { port: 0, publicUrl: new URL(base), authSecret: SECRET, allowedRedirectUris: [] },
+				service: { name: 'test' },
+				createServer: () => new McpServer({ name: 'test', version: '0.0.0' }),
+				publicDir,
+				auth: { store: memoryStore(), login: telegramLogin(telegram) },
+				routes: [telegramAccount(telegram)],
+			}),
+		)
+
+		running.push(http)
+
+		return http.base
+	}
+
+	/** Виджет вернул человека на колбэк OAuth-входа с этими полями. */
+	const widget = (fields: Record<string, string>) => (step: LoginStep) => {
+		const url = new URL(step.callback)
+
+		url.searchParams.set('request', step.request)
+
+		for (const [key, value] of Object.entries(fields)) url.searchParams.set(key, value)
+
+		return fetch(url, { redirect: 'manual' })
+	}
+
+	test('подпись из OAuth-входа не впускает в кабинет', async () => {
+		const base = await both()
+		const fields = freshTelegramLogin(IVAN, BOT)
+
+		await oauthFlow({ base, login: widget(fields) })
+
+		// Подпись взяли из истории браузера, а метку и cookie -- со своей страницы входа.
+		const { url, cookie } = await signed(base)
+
+		for (const [key, value] of Object.entries(fields)) url.searchParams.set(key, value)
+
+		const replay = await go(url, cookie)
+
+		assert.match(errorOf(replay).message, /уже использована/)
+		assert.equal(replay.headers.getSetCookie().length, 0)
+	})
+
+	test('подпись из входа в кабинет не даёт OAuth-токенов', async () => {
+		const base = await both()
+		const { url, cookie } = await signed(base)
+
+		assert.equal((await go(url, cookie)).headers.get('location'), '/account')
+
+		const fields = Object.fromEntries([...url.searchParams].filter(([key]) => key !== 'state'))
+
+		await assert.rejects(oauthFlow({ base, login: widget(fields) }), /уже использована/)
 	})
 })
 

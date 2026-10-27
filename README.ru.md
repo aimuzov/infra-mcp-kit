@@ -130,6 +130,8 @@ await serveHttp({
 - `GET /account/login` — сюда виджет возвращает человека. Кит проверяет подпись, её возраст, повтор и метку, ставит куку сессии и уводит в `/account` на языке страницы. Ссылка без подписи ведёт на `/account/signin`, поэтому «Войти» из `AccountShell` работает как есть.
 - `POST /account/logout` стирает сессию, только со своего `Origin`.
 
+Подпись годится один раз на оба входа: виджет подписывает только человека и время, поэтому потраченная в `telegramLogin` не откроет кабинет, и наоборот.
+
 Метка закрывает login CSRF: без неё чужая подписанная ссылка тихо пустила бы человека в чужой кабинет, и он загрузил бы туда свои данные. `sessions` по умолчанию — `mcp_session` кита; передай те же `sessions`, по которым твои маршруты зовут `requireSession`. `claims(user)` заменяет `{ name }` в сессии, `sub` — всегда Telegram id.
 
 ## Страницы
@@ -205,6 +207,7 @@ const { tokens, exchangeAgain } = await oauthFlow({ base, login: submitForm({ to
 - `startHttp` слушает случайный порт на 127.0.0.1.
 - `oauthFlow` проходит регистрацию, авторизацию, вход, колбэк и обмен кода. `submitForm`, `telegramSigned` и `devLink` покрывают готовые способы входа, `exchangeAgain` и `refresh` проверяют одноразовость.
 - `accountLogin(base, { user, botToken })` входит в кабинет через `telegramAccount`, как это делают страница и виджет, и отдаёт заголовок `Cookie`. `'dev'` идёт по dev-ссылке.
+- `freshTelegramLogin(user, botToken)` подписывает вход, как виджет, и у каждого вызова своя `auth_date`: те же поля в ту же секунду дают ту же подпись, и кит примет её за повтор. Ей подписывают `telegramSigned` и `accountLogin`.
 - `fakePages()` даёт `publicDir` без сборки Astro.
 
 ## Actions

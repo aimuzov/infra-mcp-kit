@@ -59,12 +59,14 @@ export function checkLanding(landing: PagesLanding | undefined): void {
 	}
 }
 
-// Ссылка встаёт в `href` как есть: `javascript:` и чужой хост под видом пути (`//x`, `/\x`)
-// не пускаем.
-const SAFE_HREF = /^(?:\/(?![/\\])|#|https?:\/\/|mailto:)/i
+// `href` встаёт как есть: `javascript:` и чужой хост под видом пути не пускаем.
+// Браузер выкидывает из адреса переносы и табы, а `\` читает как `/`:
+// `/\t/x` и `/\x` стали бы `//x`.
+const SAFE_HREF = /^(?:\/(?!\/)|#|https?:\/\/|mailto:)/i
+const UNSAFE_CHAR = /[\p{Cc}\\]/u
 
 function checkLink(id: string, link: PagesLink): void {
-	if (!SAFE_HREF.test(link.href ?? '')) {
+	if (!SAFE_HREF.test(link.href ?? '') || UNSAFE_CHAR.test(link.href)) {
 		throw new Error(`Ссылка "${link.href}" карточки "${id}": только путь, #якорь, http(s) или mailto`)
 	}
 

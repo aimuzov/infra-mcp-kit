@@ -22,12 +22,12 @@ Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://
 
 ## What's inside
 
-- [**Core**](#core): `runCli`, `serveStdio`, tool results, env helpers, `dataDir`, a stderr logger and `readVersion`.
+- [**Core**](#core): `runCli`, `serveStdio`, tool results, env helpers, `dataDir`, a stderr logger, `readVersion` and [error reports to Sentry](#sentry).
 - [**HTTP and OAuth**](#http-and-oauth): a stateless `/mcp` over Streamable HTTP, an OAuth server with single-use codes and rotating refresh tokens, Telegram and token-form sign-in, a JSON API for the account page.
 - [**Pages**](#pages): the `mcpPages()` Astro integration with the landing, sign-in, error and 404 pages in the "Signal" style.
 - [**Testing**](#testing): in-memory and HTTP clients and the whole OAuth flow for `node --test`.
 - [**Actions**](#actions) `check` and `publish` for the server workflows.
-- [**Migrating from 2.x**](#migrating-from-2x) and [from 1.x](#migrating-from-1x).
+- [**Moving to infra-site-kit 5**](#moving-to-infra-site-kit-5), [**migrating from 2.x**](#migrating-from-2x) and [from 1.x](#migrating-from-1x).
 
 ## Install
 
@@ -60,6 +60,17 @@ await runCli({
 - `dataDir(name)` is `<NAME>_DATA_DIR`, then `$XDG_CONFIG_HOME/<name>`, then `~/.config/<name>`.
 - `log` writes to stderr only, stdout belongs to the protocol. `LOG_LEVEL` is `error`, `warn`, `info` (default) or `debug`, `LOG_FILE` adds a file.
 - `readVersion(import.meta.url)` finds the nearest `package.json`, so the MCP handshake never lags behind the release.
+
+### Sentry
+
+Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. The server writes no code for it, and without the variable the SDK is not even loaded. The variable has to be in the environment when `runCli` starts: if it lives in `.env`, call `loadEnvFile()` first.
+
+- The release is `<name>@<version>` from `runCli`, so `name` should match the Sentry project. The environment is `production`, `SENTRY_ENVIRONMENT` changes it for a local check.
+- Sent: uncaught exceptions and rejections (the process still exits with 1, once the event is out), errors of tool, prompt and resource handlers, including the ones the client gets back as `isError`, tagged `mcp.tool`, `mcp.prompt` or `mcp.resource`, failed HTTP, `/mcp` and OAuth requests and sign-ins tagged `http.path`, and an error that stops `runCli`.
+- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, so user data has no place in error messages.
+- Errors only, no traces. The client is `@sentry/core` instead of `@sentry/node`: 13 MB instead of 80, no OpenTelemetry and no breadcrumbs from the console or outgoing requests.
+- A server that called `Sentry.init` itself before `runCli`, from any SDK version, gets no second client: the kit sends its errors through the server's client with the same tags and does not read `SENTRY_DSN`.
+- A server without `runCli` calls `await initSentry({ name, version })` itself. `captureError(error, tags)` sends an error the server caught on its own, `withTags(tags, run)` tags every error inside `run`.
 
 ## HTTP and OAuth
 
@@ -100,7 +111,7 @@ OAuth rules:
 Sign-in is a static page plus a `complete({ request, query, form })` hook that tells who came back:
 
 - `telegramLogin({ botToken })` checks the Telegram widget signature, a sign-in older than 10 minutes or a replayed one is refused. `devUserId` enables `?dev=1` on loopback.
-- `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message.
+- `tokenFormLogin({ fields, verify })` takes the form by POST. `verify` returns `{ subject, claims }`, and the claims reach `createServer` in `auth.extra`. A `LoginError` brings the person back to the form with its message. `hide` drops the fields the server knows on its own, see [Token form](#token-form).
 
 The sign-in context, the signed request, the client and the previous error, travels in the URL fragment, so it reaches neither the server logs nor the proxy.
 
@@ -138,19 +149,71 @@ export default defineConfig({
 - `mcpPages` adds `/`, `/error`, `/404`, `/login` with `tokenForm` and `/login/telegram` with `telegram: { botName, grants }`. `override` leaves a page to the service. `service.accent` takes `{ light, dark }` colors.
 - The pages ship with a strict CSP: scripts and styles by hash, everything else from `'self'`.
 - A page of the service uses `@aimuzov/infra-mcp-kit/astro/layout.astro`. The islands are in `astro/components`: `AccountShell` loads `/account/state` and shows sign-in on 401, `Connect` shows the connector address.
-- Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`.
+- Dev dependencies of the server: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` and `postcss-nested`, plus `svelte.config.js` with `vitePreprocess()` and `postcss.config.mjs` with `postcss-nested`. They never reach the runtime or `npx`. infra-site-kit goes in as `github:aimuzov/infra-site-kit#v5.8.1`, see [below](#moving-to-infra-site-kit-5).
 
 [`e2e/connector`](e2e/connector) is a working example.
 
+### Token form
+
+The form is described once, in a module that both `astro.config.mjs` and the server import, so the page and `tokenFormLogin` never drift apart:
+
+```ts
+// src/login-form.ts
+import { defineTokenForm } from '@aimuzov/infra-mcp-kit/astro'
+
+export const loginForm = defineTokenForm({
+	title: { ru: 'Подключение example', en: 'Connecting example' },
+	fields: [
+		{ name: 'url', label: { ru: 'Адрес', en: 'Address' }, type: 'url', placeholder: 'https://example.com' },
+		{ name: 'token', label: { ru: 'API-токен', en: 'API token' }, type: 'password' },
+	],
+})
+```
+
+```js
+// astro.config.mjs
+import { loginForm } from './src/login-form.ts'
+
+mcpPages({ service, tokenForm: loginForm })
+```
+
+```ts
+// src/http.ts
+tokenFormLogin({
+	fields: loginForm.fields,
+	// The address came from env: the page hides the field, the server neither asks for it nor reads it.
+	hide: process.env.EXAMPLE_URL ? ['url'] : [],
+	verify,
+})
+```
+
+- The page is built before the server knows its env, so `hide` works at runtime: the list travels in the URL fragment (`hide=url`), the island drops those fields after hydration, and `verify` gets no value for them even if someone sends one. A name that is not in the form stops the server start, and so does a hidden name with anything but Latin letters, digits, `_`, `-` and `.`: a comma would split the list.
+- Texts take a string or `{ ru, en }`. A translation in `service.strings` under the keys from [Languages](#languages) still wins, so a config with plain strings keeps working. The server writes its "fill in the field" error with the same labels.
+- `defineTokenForm`, `mcpPages` and `tokenFormLogin` reject a repeated field name and the name `request`, which carries the signed sign-in request.
+- `defineTokenForm` and the `TokenForm` and `TokenFormField` types come from both `/astro` and `/http`. The shared module takes them from `/astro`: that entry loads neither Astro nor the server, so it stays light in the config and at runtime.
+- `loginStep` of `/testing` gives the hidden fields as `step.hide`.
+
 ### Languages
 
-With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets a language switch next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
+With `locales: ['ru', 'en']` the kit builds every page twice: Russian without a prefix, English under `/en/`. The header gets the infra-site-kit language menu next to the theme button, the head gets `canonical` and `hreflang`, the texts of the kit come from its dictionaries and the shared parts from infra-site-kit.
 
-English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
+The token form can take its texts as `{ ru, en }` right in the config, see [Token form](#token-form). Otherwise English for the service's own config goes into `service.strings.en` by key: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. A key with no translation shows the field as written, so a config stays as it is.
 
 A page of the service covers both languages with `export const getStaticPaths = localePaths` in `pages/[...lang]/account.astro` and takes its own strings with `pt(locale, key)` from `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
-On the first visit the server sends a person whose browser prefers English to `/en/...`. The switch remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
+On the first visit the server sends a person whose browser prefers English to `/en/...`. The menu remembers the choice in the `lang` cookie, and from then on the cookie decides. Login errors, the error page and the account API speak the language of the page they came from. `LoginError` takes `{ ru, en }`. OAuth errors stay in ASCII English: that's the protocol.
+
+### Moving to infra-site-kit 5
+
+The pages are checked on infra-site-kit 5.8.1, and that is the version to install. The kit's API stays the same, a server only moves its dev dependency:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
+```
+
+- 5.0 drops the `approach` option of `themePeek`. The kit's theme button never passed it, so only a page of the server that calls `themePeek(node, { approach })` itself has to drop it.
+- 5.1 turns the language switch into a menu: `details.lang` with a link per language instead of the `a.lang` link to the other one. A test of the server that clicked `a.lang` opens the menu first: `page.locator('details.lang summary').click()`, then `page.getByRole('link', { name: /English/ })`.
+- A server that stays on 4.2 keeps working: the kit uses nothing that 4.2 lacks, its header just shows the old link.
 
 ### Landing
 
@@ -258,15 +321,15 @@ Optional inputs of the action:
 
 - `coverage-lines: 95` fails the check below 95% line coverage. The `test` script must start with `node`: the action puts the coverage flags right after it, because Node accepts them neither in `NODE_OPTIONS` nor after the test glob. Test files, `*.e2e.ts` and `testing/` helpers are left out of the count.
 - `astro-tsconfig: tsconfig.astro.json` points `astro check` and `svelte-check` to their own config when the root one is for the server.
-- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version.
+- `ui: true` runs `npm run test:ui` in Chromium after the build, with the browser cached by the Playwright version. The runner image already has the libraries Chromium needs, so apt runs only when the browser doesn't start without them, with a time limit and three attempts. `--with-deps` used to pull fonts from a slow mirror past the job timeout. A server that installs Playwright in its own steps after the action still runs `npx playwright install --with-deps chromium` and hits the same apt: replace those steps with `ui: true` and keep only `upload-artifact` for the screenshots.
 
-The pages need infra-site-kit 4.1.1 or newer: the kit's CSP no longer allows `style` attributes, and older `Skeleton` and `InfoTip` render them.
+The pages need infra-site-kit 4.2.0 or newer, the one with `i18n.js` and the language switch. `mcpPages()` checks the installed one and stops `astro check`, `astro build` and `astro dev` with the version to install, before Vite fails on `exports`. A version it can't parse, as in a fork or a local copy, gets only a warning. It is not a peer dependency: stdio servers without pages keep site-kit for the Prettier and oxlint configs, and an older one there must not break their `npm install`.
 
 ## Migrating from 2.x
 
 3.0 runs on [tmcp](https://github.com/paoloricciuti/tmcp) instead of the official SDK and on `node:http` instead of express. A hosted server's runtime goes from 27 MB in 98 packages to 12 MB in 15, 8 MB of it zod. Issued tokens and `auth.db` stay as they are: nobody has to reconnect.
 
-1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4. The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
+1. Dependencies: drop `@modelcontextprotocol/sdk` and `@types/express` from `dependencies`, add `zod` 4, move infra-site-kit to `#v5.8.1` as [above](#moving-to-infra-site-kit-5). The SDK stays in devDependencies for tests: `connectInMemory` and `connectHttp` still give its client.
 2. Imports: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` and the other result types come from `@aimuzov/infra-mcp-kit`. `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` and `server.server.elicitInput()` keep the SDK signatures.
 3. A thrown handler is a result with `isError`, as with `tool()`; the tool list keeps the input schema of the SDK.
 4. `createHttpApp` returns `{ handle, listener, context }`: `handle(request)` takes a `Request` and gives a `Response`, `listener` goes to `node:http`. `startHttp` takes the app itself, `.app` is gone.

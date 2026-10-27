@@ -27,7 +27,8 @@ export {
 	type TelegramLoginOptions,
 	type TelegramUser,
 } from './login/telegram.ts'
-export { tokenFormLogin, type TokenFormField, type TokenFormLoginOptions } from './login/token-form.ts'
+export { tokenFormLogin, type TokenFormLoginOptions } from './login/token-form.ts'
+export { defineTokenForm, type TokenForm, type TokenFormField } from '#kit/token-form'
 export {
 	CALLBACK_PATH,
 	challenge,

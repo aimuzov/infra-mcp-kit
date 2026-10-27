@@ -3,8 +3,12 @@ import type { AstroIntegration } from 'astro'
 
 import { checkLanding, type PagesLanding } from '#kit/astro/landing'
 import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
+import { checkTokenFields, type TokenForm } from '#kit/token-form'
 
-export type { Locale, Strings } from '#kit/i18n'
+import { assertSiteKit, siteKitVersion } from './site-kit.ts'
+
+export type { Locale, Localized, Strings } from '#kit/i18n'
+export { defineTokenForm, type TokenForm, type TokenFormField } from '#kit/token-form'
 
 /** Что знают страницы кита о сервисе на сборке. */
 export type PagesService = {
@@ -44,6 +48,7 @@ export type PagesTool = {
 	icon?: string
 }
 
+/** Поле, как его получает остров формы: тексты уже на языке страницы. */
 export type TokenField = {
 	name: string
 	label: string
@@ -56,8 +61,11 @@ export type TokenField = {
 
 export type McpPagesOptions = {
 	service: PagesService
-	/** Вход по токен-форме, страница `/login`. Сервер берёт `tokenFormLogin`. */
-	tokenForm?: { title: string; lead?: string; fields: TokenField[]; submit?: string }
+	/**
+	 * Вход по токен-форме, страница `/login`. Сервер берёт `tokenFormLogin` с теми же полями:
+	 * общий модуль с `defineTokenForm` даёт их обоим.
+	 */
+	tokenForm?: TokenForm
 	/** Вход через Telegram, страница `/login/telegram`. Сервер берёт `telegramLogin`. */
 	telegram?: { botName: string; grants?: string[] }
 	/** Страницы кита, которые сервис рисует сам, например свой лендинг. */
@@ -135,10 +143,14 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	// Плохой цвет роняет сборку сразу, а не при первой загрузке стилей.
 	serviceCss(options.service)
 
+	if (options.tokenForm) checkTokenFields(options.tokenForm.fields)
+
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+			'astro:config:setup': ({ config, injectRoute, updateConfig, logger }) => {
+				assertSiteKit(siteKitVersion(), logger)
+
 				const { logo } = options.service
 				const resolved: McpPagesOptions = logo
 					? {

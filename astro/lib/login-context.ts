@@ -11,6 +11,8 @@ export type LoginContext = {
 	error: string
 	/** Telegram id для входа без виджета, только на localhost. */
 	dev: string
+	/** Поля формы, которые сервер в этом запуске не спрашивает: `hide` у `tokenFormLogin`. */
+	hide: string[]
 }
 
 export function readLoginContext(hash = location.hash): LoginContext {
@@ -24,6 +26,7 @@ export function readLoginContext(hash = location.hash): LoginContext {
 		host: get('host'),
 		error: get('error'),
 		dev: get('dev'),
+		hide: get('hide').split(',').filter(Boolean),
 	}
 }
 

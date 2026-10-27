@@ -22,12 +22,12 @@
 
 ## Что внутри
 
-- [**Ядро**](#ядро): `runCli`, `serveStdio`, результаты инструментов, хелперы окружения, `dataDir`, логгер в stderr и `readVersion`.
+- [**Ядро**](#ядро): `runCli`, `serveStdio`, результаты инструментов, хелперы окружения, `dataDir`, логгер в stderr, `readVersion` и [отчёты об ошибках в Sentry](#sentry).
 - [**HTTP и OAuth**](#http-и-oauth): `/mcp` без состояния поверх Streamable HTTP, OAuth-сервер с одноразовыми кодами и ротацией refresh-токенов, вход через Telegram и форму токена, JSON-API для кабинета.
 - [**Страницы**](#страницы): Astro-интеграция `mcpPages()` с лендингом, входом, страницами ошибки и 404 в стиле «Сигнал».
 - [**Тесты**](#тесты): клиенты в памяти и по HTTP и весь OAuth-поток для `node --test`.
 - [**Actions**](#actions) `check` и `publish` для workflow серверов.
-- [**Переезд с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
+- [**Переезд на infra-site-kit 5**](#переезд-на-infra-site-kit-5), [**с 2.x**](#переезд-с-2x) и [с 1.x](#переезд-с-1x).
 
 ## Установка
 
@@ -60,6 +60,17 @@ await runCli({
 - `dataDir(name)` — это `<NAME>_DATA_DIR`, затем `$XDG_CONFIG_HOME/<name>`, затем `~/.config/<name>`.
 - `log` пишет только в stderr: stdout принадлежит протоколу. `LOG_LEVEL` — `error`, `warn`, `info` (по умолчанию) или `debug`, `LOG_FILE` добавляет файл.
 - `readVersion(import.meta.url)` находит ближайший `package.json`, поэтому рукопожатие MCP не отстаёт от релиза.
+
+### Sentry
+
+Задайте `SENTRY_DSN`, и `runCli` включит отчёты об ошибках до запуска команды. Коду сервера ничего писать не нужно, а без переменной SDK даже не загружается. Переменная должна быть в окружении к старту `runCli`: если она в `.env`, сначала вызовите `loadEnvFile()`.
+
+- Релиз — `<name>@<version>` из `runCli`, поэтому `name` должен совпадать с проектом в Sentry. Окружение — `production`, `SENTRY_ENVIRONMENT` меняет его для проверки на своей машине.
+- Уходят: необработанные исключения и reject-ы (процесс всё так же выходит с кодом 1, когда событие отправлено), ошибки обработчиков инструментов, промптов и ресурсов, в том числе те, что клиент получает ответом с `isError`, с тегом `mcp.tool`, `mcp.prompt` или `mcp.resource`, упавшие запросы HTTP, `/mcp`, OAuth и входа с тегом `http.path`, и ошибка, на которой остановился `runCli`.
+- Остаются на сервере: аргументы и ответы инструментов, заголовки, тела, query-параметры, cookie и локальные переменные. Наружу идут только текст ошибки и стек, поэтому данным людей в текстах ошибок не место.
+- Только ошибки, без трейсов. Клиент — `@sentry/core`, а не `@sentry/node`: 13 МБ вместо 80, без OpenTelemetry и без хлебных крошек из консоли и исходящих запросов.
+- Если сервер сам вызвал `Sentry.init` до `runCli`, из любой версии SDK, второй клиент не заводится: кит шлёт свои ошибки через клиент сервера с теми же тегами и `SENTRY_DSN` не читает.
+- Сервер без `runCli` вызывает `await initSentry({ name, version })` сам. `captureError(error, tags)` отправляет ошибку, которую сервер поймал своими силами, `withTags(tags, run)` ставит теги на все ошибки внутри `run`.
 
 ## HTTP и OAuth
 
@@ -141,7 +152,7 @@ export default defineConfig({
 - `mcpPages` добавляет `/`, `/error`, `/404`, `/login` с `tokenForm` и `/login/telegram` с `telegram: { botName, grants }`. `override` оставляет страницу сервису. `service.accent` принимает цвета `{ light, dark }`.
 - У страниц строгий CSP: скрипты и стили по хешу, всё остальное с `'self'`.
 - Своя страница сервиса строится на `@aimuzov/infra-mcp-kit/astro/layout.astro`. Острова лежат в `astro/components`: `AccountShell` загружает `/account/state` и на 401 показывает вход, `Connect` показывает адрес коннектора.
-- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают.
+- Dev-зависимости сервера: `astro`, `@astrojs/svelte`, `svelte`, `@aimuzov/infra-site-kit` и `postcss-nested`, а также `svelte.config.js` с `vitePreprocess()` и `postcss.config.mjs` с `postcss-nested`. В рантайм и в `npx` они не попадают. infra-site-kit ставится как `github:aimuzov/infra-site-kit#v5.8.1`, см. [ниже](#переезд-на-infra-site-kit-5).
 
 Рабочий пример — [`e2e/connector`](e2e/connector).
 
@@ -187,13 +198,25 @@ tokenFormLogin({
 
 ### Языки
 
-С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется переключатель языка, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
+С `locales: ['ru', 'en']` кит собирает каждую страницу дважды: русскую без префикса, английскую под `/en/`. В шапке рядом с кнопкой темы появляется меню языков из infra-site-kit, в `<head>` -- `canonical` и `hreflang`. Тексты кита берутся из его словарей, общие части -- из infra-site-kit.
 
 Форма входа по токену может держать тексты как `{ ru, en }` прямо в конфиге, см. [Форма входа по токену](#форма-входа-по-токену). В остальном английский для полей конфига сервиса кладётся в `service.strings.en` по ключам: `service.tagline`, `service.lead`, `tool.<label>`, `tokenForm.title`, `tokenForm.lead`, `tokenForm.submit`, `field.<name>.label`, `field.<name>.placeholder`, `field.<name>.hint`, `telegram.grant.<i>`. Нет перевода -- поле показывается как в конфиге, так что старый конфиг остаётся как есть.
 
 Своя страница сервиса покрывает оба языка через `export const getStaticPaths = localePaths` в `pages/[...lang]/account.astro`, а свои строки берёт через `pt(locale, key)` из `@aimuzov/infra-mcp-kit/astro/lib/i18n.ts`.
 
-При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Переключатель запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+При первом заходе сервер уводит человека, чей браузер предпочитает английский, на `/en/...`. Меню запоминает выбор в cookie `lang`, и дальше решает она. Ошибки входа, страница ошибки и API кабинета говорят на языке страницы, с которой пришли. `LoginError` принимает `{ ru, en }`. Ошибки OAuth остаются ASCII на английском: это протокол.
+
+### Переезд на infra-site-kit 5
+
+Страницы проверены на infra-site-kit 5.8.1, его и ставь. API кита не меняется, сервер только переводит свою dev-зависимость:
+
+```bash
+npm install -E -D github:aimuzov/infra-site-kit#v5.8.1
+```
+
+- 5.0 убирает у `themePeek` опцию `approach`. Кнопка темы кита её не передавала, так что убрать её нужно, только если страница сервера сама вызывает `themePeek(node, { approach })`.
+- 5.1 превращает переключатель языка в меню: `details.lang` со ссылкой на каждый язык вместо ссылки `a.lang` на другой. Тест сервера, который кликал `a.lang`, сначала открывает меню: `page.locator('details.lang summary').click()`, потом `page.getByRole('link', { name: /English/ })`.
+- Сервер на 4.2 продолжает работать: кит не берёт ничего, чего нет в 4.2, просто в шапке остаётся старая ссылка.
 
 ## Тесты
 
@@ -248,15 +271,15 @@ release-please через [aimuzov/.github](https://github.com/aimuzov/.github) 
 
 - `coverage-lines: 95` валит проверку при покрытии строк ниже 95%. Скрипт `test` должен начинаться с `node`: флаги покрытия action ставит сразу за ним, потому что ни в `NODE_OPTIONS`, ни после глоба тестов Node их не принимает. Тесты, `*.e2e.ts` и хелперы из `testing/` в счёт не идут.
 - `astro-tsconfig: tsconfig.astro.json` -- свой конфиг для `astro check` и `svelte-check`, когда корневой отдан серверу.
-- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright.
+- `ui: true` после сборки гоняет `npm run test:ui` в Chromium, браузер кэшируется по версии Playwright. Библиотеки Chromium в образе раннера уже есть, поэтому apt запускается, только если браузер без них не стартует, с лимитом по времени и тремя попытками. `--with-deps` тянул из apt шрифты, и медленное зеркало растягивало это до таймаута джобы. Сервер, который ставит Playwright своими шагами после action, по-прежнему запускает `npx playwright install --with-deps chromium` и упирается в тот же apt: эти шаги нужно заменить на `ui: true`, оставив только `upload-artifact` для снимков.
 
-Страницам нужен infra-site-kit 4.1.1 или новее: CSP кита больше не пускает атрибут `style`, а старые `Skeleton` и `InfoTip` его пишут.
+Страницам нужен infra-site-kit 4.2.0 или новее, с `i18n.js` и переключателем языка. `mcpPages()` проверяет установленный и останавливает `astro check`, `astro build` и `astro dev` с версией, которую надо поставить, раньше, чем Vite упадёт на `exports`. Неразборчивую версию, как у форка или локальной копии, он только отмечает предупреждением. Peer-зависимостью он не объявлен: stdio-серверы без страниц держат site-kit ради конфигов Prettier и oxlint, и старый не должен ронять им `npm install`.
 
 ## Переезд с 2.x
 
 3.0 работает на [tmcp](https://github.com/paoloricciuti/tmcp) вместо официального SDK и на `node:http` вместо express. Рантайм размещённого сервера худеет с 27 МБ в 98 пакетах до 12 МБ в 15, из них 8 МБ — zod. Выданные токены и `auth.db` остаются как есть: переподключаться никому не придётся.
 
-1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4. SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
+1. Зависимости: убери `@modelcontextprotocol/sdk` и `@types/express` из `dependencies`, добавь `zod` 4, переведи infra-site-kit на `#v5.8.1`, как [выше](#переезд-на-infra-site-kit-5). SDK остаётся в devDependencies для тестов: `connectInMemory` и `connectHttp` по-прежнему дают его клиента.
 2. Импорты: `McpServer`, `ResourceTemplate`, `AuthInfo`, `CallToolResult` и другие типы результатов берутся из `@aimuzov/infra-mcp-kit`. У `registerTool`, `registerPrompt`, `registerResource`, `server.server.getClientCapabilities()` и `server.server.elicitInput()` сигнатуры SDK.
 3. Исключение в обработчике — результат с `isError`, как у `tool()`; в списке инструментов схема входа та же, что у SDK.
 4. `createHttpApp` отдаёт `{ handle, listener, context }`: `handle(request)` принимает `Request` и отдаёт `Response`, `listener` идёт в `node:http`. `startHttp` принимает само приложение, `.app` больше нет.

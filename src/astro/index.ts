@@ -4,6 +4,8 @@ import type { AstroIntegration } from 'astro'
 import { DEFAULT_LOCALE, type Locale, type Strings } from '#kit/i18n'
 import { checkTokenFields, type TokenForm } from '#kit/token-form'
 
+import { assertSiteKit, siteKitVersion } from './site-kit.ts'
+
 export type { Locale, Localized, Strings } from '#kit/i18n'
 export { defineTokenForm, type TokenForm, type TokenFormField } from '#kit/token-form'
 
@@ -135,7 +137,9 @@ export default function mcpPages(options: McpPagesOptions): AstroIntegration {
 	return {
 		name: '@aimuzov/infra-mcp-kit/astro',
 		hooks: {
-			'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+			'astro:config:setup': ({ config, injectRoute, updateConfig, logger }) => {
+				assertSiteKit(siteKitVersion(), logger)
+
 				const { logo } = options.service
 				const resolved: McpPagesOptions = logo
 					? {

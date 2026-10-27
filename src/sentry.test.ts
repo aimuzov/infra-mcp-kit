@@ -176,6 +176,20 @@ describe('sentry', () => {
 		assert.ok(!sent[0]!.raw.includes(SECRET_QUERY), 'адрес запроса с параметрами не уходит в Sentry')
 	})
 
+	test('одинаковые ошибки подряд уходят каждая, одна и та же -- один раз', async () => {
+		const error = new Error('again')
+
+		captureError(error)
+		captureError(error, { 'http.path': '/mcp' })
+
+		for (let i = 0; i < 2; i++) captureError(new Error('same'))
+
+		assert.deepEqual(
+			(await events()).map((event) => event.exception?.values[0]?.value),
+			['again', 'same', 'same'],
+		)
+	})
+
 	// Отдельный процесс: здесь SDK уже включён с подменённым транспортом, а проверить нужно
 	// настоящую отправку по сети и падение процесса. Вместо Sentry -- локальный сервер.
 	for (const [kind, crash] of [

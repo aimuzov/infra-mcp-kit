@@ -18,6 +18,7 @@ export type SentryOptions = {
 
 let core: Core | undefined
 const tagged = new AsyncLocalStorage<Tags>()
+const captured = new WeakSet<object>()
 
 /**
  * Включить отчёты об ошибках, если задан `SENTRY_DSN`; без него SDK даже не загружается.
@@ -60,7 +61,6 @@ export async function initSentry({ name, version, env = process.env, transport }
 			sentry.eventFiltersIntegration(),
 			sentry.functionToStringIntegration(),
 			sentry.linkedErrorsIntegration(),
-			sentry.dedupeIntegration(),
 		],
 		stackParser: sentry.createStackParser(nodeStackLineParser()),
 		transport: transport ?? fetchTransport(sentry),
@@ -106,7 +106,17 @@ async function fatal(error: unknown) {
 
 /** Отправить ошибку, которую кит поймал и превратил в ответ. Без Sentry ничего не делает. */
 export function captureError(error: unknown, tags?: Tags): void {
-	core?.captureException(error, { tags: { ...tagged.getStore(), ...tags } })
+	if (!core) return
+
+	// Одну ошибку могут поймать двое, например обработчик и HTTP-слой над ним. `dedupeIntegration`
+	// тут не годится: он склеивает и разные случаи подряд с одинаковым стеком.
+	if (error !== null && typeof error === 'object') {
+		if (captured.has(error)) return
+
+		captured.add(error)
+	}
+
+	core.captureException(error, { tags: { ...tagged.getStore(), ...tags } })
 }
 
 /**

@@ -44,6 +44,22 @@ test('лендинг: плохая карточка роняет сборку', 
 	}
 })
 
+test('лендинг: перевод по ключу проверяется так, как встанет на страницу', () => {
+	const cards = [card({ title: { ru: 'Кабинет', en: '' }, links: [{ href: '/account', label: 'Открыть' }] })]
+
+	assert.doesNotThrow(() => checkLanding({ cards }, { en: { 'card.account.title': 'Account' } }))
+	assert.throws(() => checkLanding({ cards: [card()] }, { en: { 'card.account.title': '' } }), /нет заголовка/)
+
+	assert.throws(
+		() =>
+			checkLanding(
+				{ cards: [card({ links: [{ href: '/account', label: 'Открыть' }] })] },
+				{ en: { 'card.account.link.0': '' } },
+			),
+		/нет подписи/,
+	)
+})
+
 test('лендинг: ссылка -- только путь, якорь, http(s) или почта', () => {
 	for (const href of [
 		'javascript:alert(1)',

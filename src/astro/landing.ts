@@ -1,4 +1,4 @@
-import { LOCALES, localizePath, pick, type Localized } from '#kit/i18n'
+import { LOCALES, localizePath, pick, type Localized, type Strings } from '#kit/i18n'
 
 /** Свои карточки лендинга поверх его разметки: героя, "Подключить" и инструментов. */
 export type PagesLanding = {
@@ -39,8 +39,11 @@ const PLACES: readonly LandingPlace[] = ['hero', 'connect', 'tools']
  * Карточки лендинга из конфига: без повторов имени, с заголовком и ссылками, которые можно
  * показать. Плохая карточка роняет сборку, а не тихо пропадает со страницы.
  */
-export function checkLanding(landing: PagesLanding | undefined): void {
+export function checkLanding(landing: PagesLanding | undefined, strings?: Strings): void {
 	const ids = new Set<string>()
+	// Тот же текст, что покажет `own` на странице языка: перевод по ключу сильнее конфига.
+	const filled = (key: string, value: Localized | undefined) =>
+		LOCALES.every((locale) => Boolean(strings?.[locale]?.[key] ?? pick(value, locale)))
 
 	for (const card of landing?.cards ?? []) {
 		if (!/^[\w-]+$/.test(card.id ?? '')) throw new Error(`Неподходящее имя карточки лендинга: "${card.id}"`)
@@ -49,13 +52,21 @@ export function checkLanding(landing: PagesLanding | undefined): void {
 
 		ids.add(card.id)
 
-		if (!filled(card.title)) throw new Error(`У карточки лендинга "${card.id}" нет заголовка`)
+		if (!filled(`card.${card.id}.title`, card.title)) {
+			throw new Error(`У карточки лендинга "${card.id}" нет заголовка`)
+		}
 
 		if (card.after !== undefined && !PLACES.includes(card.after)) {
 			throw new Error(`Карточка лендинга "${card.id}": after -- одно из ${PLACES.join(', ')}`)
 		}
 
-		for (const link of card.links ?? []) checkLink(card.id, link)
+		for (const [i, link] of (card.links ?? []).entries()) {
+			checkLink(card.id, link)
+
+			if (!filled(`card.${card.id}.link.${i}`, link.label)) {
+				throw new Error(`У ссылки "${link.href}" карточки "${card.id}" нет подписи`)
+			}
+		}
 	}
 }
 
@@ -69,13 +80,6 @@ function checkLink(id: string, link: PagesLink): void {
 	if (!SAFE_HREF.test(link.href ?? '') || UNSAFE_CHAR.test(link.href)) {
 		throw new Error(`Ссылка "${link.href}" карточки "${id}": только путь, #якорь, http(s) или mailto`)
 	}
-
-	if (!filled(link.label)) throw new Error(`У ссылки "${link.href}" карточки "${id}" нет подписи`)
-}
-
-// Пустой текст на одном языке дал бы пустой заголовок на его странице.
-function filled(value: Localized | undefined): boolean {
-	return LOCALES.every((locale) => Boolean(pick(value, locale)))
 }
 
 /**

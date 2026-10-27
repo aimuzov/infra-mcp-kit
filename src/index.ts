@@ -23,5 +23,6 @@ export {
 	type Transport,
 } from './mcp.ts'
 export { failure, json, messageOf, text, tool, type JsonOptions, type ToolOptions } from './results.ts'
+export { captureError, flushSentry, initSentry, withTags, type SentryOptions } from './sentry.ts'
 export { serveStdio, StdioServerTransport } from './stdio.ts'
 export { readVersion } from './version.ts'

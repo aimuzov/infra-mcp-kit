@@ -5,6 +5,7 @@ import { z, type ZodType } from 'zod'
 
 import { log as defaultLog, type Logger } from './log.ts'
 import { failure, messageOf } from './results.ts'
+import { captureError, withTags } from './sentry.ts'
 
 export type TextContent = { type: 'text'; text: string; _meta?: Record<string, unknown> }
 export type ImageContent = { type: 'image' | 'audio'; data: string; mimeType: string; _meta?: Record<string, unknown> }
@@ -245,19 +246,21 @@ export class McpServer {
 					annotations: config.annotations,
 					_meta: config._meta,
 				} as never,
-				(async (input: unknown) => {
-					const extra = this.#extra()
+				((input: unknown) =>
+					withTags({ 'mcp.tool': name }, async () => {
+						const extra = this.#extra()
 
-					// tmcp отвечает на исключение ошибкой JSON-RPC, а модель
-					// должна прочитать текст и поправиться.
-					try {
-						return (await (schema ? handler(input, extra) : handler(extra))) as CallToolResult
-					} catch (error) {
-						this.#logger.error('tool failed', { tool: name, message: messageOf(error) })
+						// tmcp отвечает на исключение ошибкой JSON-RPC, а модель
+						// должна прочитать текст и поправиться.
+						try {
+							return (await (schema ? handler(input, extra) : handler(extra))) as CallToolResult
+						} catch (error) {
+							this.#logger.error('tool failed', { tool: name, message: messageOf(error) })
+							captureError(error)
 
-						return failure(error)
-					}
-				}) as never,
+							return failure(error)
+						}
+					})) as never,
 			),
 		)
 	}
@@ -282,11 +285,12 @@ export class McpServer {
 		this.#register((tmcp) =>
 			tmcp.prompt(
 				{ name, title: config.title, description: config.description, schema } as never,
-				(async (input: unknown) => {
-					const extra = this.#extra()
+				((input: unknown) =>
+					reported({ 'mcp.prompt': name }, () => {
+						const extra = this.#extra()
 
-					return schema ? handler(input, extra) : handler(extra)
-				}) as never,
+						return schema ? handler(input, extra) : handler(extra)
+					})) as never,
 			),
 		)
 	}
@@ -315,7 +319,8 @@ export class McpServer {
 			this.#register((tmcp) =>
 				tmcp.resource(
 					{ name, uri: uriOrTemplate, ...metadata } as never,
-					(async (uri: string) => handler(new URL(uri), this.#extra())) as never,
+					((uri: string) =>
+						reported({ 'mcp.resource': name }, () => handler(new URL(uri), this.#extra()))) as never,
 				),
 			)
 
@@ -344,8 +349,8 @@ export class McpServer {
 							)
 						: undefined,
 				} as never,
-				(async (uri: string, params: Record<string, string | string[]>) =>
-					handler(new URL(uri), params, this.#extra())) as never,
+				((uri: string, params: Record<string, string | string[]>) =>
+					reported({ 'mcp.resource': name }, () => handler(new URL(uri), params, this.#extra()))) as never,
 			),
 		)
 	}
@@ -408,7 +413,10 @@ export class McpServer {
 					// Отменённому запросу ответ не нужен: клиент уже его забыл.
 					if (response && !controller.signal.aborted) await transport.send(response)
 				})
-				.catch((error) => this.#logger.error('mcp message failed', { message: messageOf(error) }))
+				.catch((error) => {
+					this.#logger.error('mcp message failed', { message: messageOf(error) })
+					captureError(error)
+				})
 				.finally(() => {
 					if (isRequest) this.#inFlight.delete(message.id!)
 				})
@@ -471,6 +479,22 @@ export class McpServer {
 			client: client ? `${client.name}/${client.version}` : undefined,
 		})
 	}
+}
+
+/**
+ * Ошибку промпта или ресурса tmcp сам превращает в ответ JSON-RPC:
+ * отправляем её в Sentry и отдаём ему дальше.
+ */
+function reported(tags: Record<string, string>, run: () => unknown): Promise<unknown> {
+	return withTags(tags, async () => {
+		try {
+			return await run()
+		} catch (error) {
+			captureError(error)
+
+			throw error
+		}
+	})
 }
 
 /** У промпта без аргументов tmcp пишет `arguments: []`, SDK поля не шлёт вовсе. */

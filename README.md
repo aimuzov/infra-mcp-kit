@@ -242,7 +242,7 @@ One config for both checks one side by the other's rules: under `bundler` a serv
 }
 ```
 
-`tsconfig.build.json` extends the server's config in both layouts. When an island imports types from the server through `imports` with a custom condition, like `#thinks/*` in thinks-mcp, the pages' config repeats the server's `customConditions`.
+`tsconfig.build.json` extends the server's config: `./tsconfig.json` in the first layout, `./tsconfig.node.json` in the second. When an island imports types from the server through `imports` with a custom condition, like `#thinks/*` in thinks-mcp, the pages' config repeats the server's `customConditions`.
 
 ### Chromium in CI
 

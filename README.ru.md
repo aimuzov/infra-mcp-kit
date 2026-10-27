@@ -245,7 +245,7 @@ jobs:
 }
 ```
 
-`tsconfig.build.json` в обеих схемах расширяет конфиг сервера. Если остров берёт типы из сервера через `imports` со своим условием, как `#thinks/*` в thinks-mcp, конфиг страниц повторяет `customConditions` сервера.
+`tsconfig.build.json` расширяет конфиг сервера: `./tsconfig.json` в первой схеме, `./tsconfig.node.json` во второй. Если остров берёт типы из сервера через `imports` со своим условием, как `#thinks/*` в thinks-mcp, конфиг страниц повторяет `customConditions` сервера.
 
 ### Chromium в CI
 

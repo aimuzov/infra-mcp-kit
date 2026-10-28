@@ -167,7 +167,10 @@ const secretField = (key: string, value: unknown) =>
 	typeof value !== 'boolean' &&
 	!(typeof value === 'number' && COUNTER.test(key))
 
-function clean(value: unknown, key: string, depth: number): unknown {
+// Копии уже пройденных объектов. Пока объект проходим, в нём `[Filtered]`: так цикл обрывается.
+type Seen = WeakMap<object, unknown>
+
+function clean(value: unknown, key: string, depth: number, seen: Seen): unknown {
 	if (IDS.has(key)) return value
 
 	if (key && secretField(key, value)) return FILTERED
@@ -178,10 +181,39 @@ function clean(value: unknown, key: string, depth: number): unknown {
 
 	if (depth > 10) return FILTERED
 
-	if (Array.isArray(value)) return value.map((item) => clean(item, '', depth + 1))
+	// Объект, на который ссылаются много раз, проходим однажды: иначе десяток ссылок
+	// на десяти уровнях вложенности дал бы 10^10 шагов.
+	if (seen.has(value)) return seen.get(value)
+
+	seen.set(value, FILTERED)
+
+	const copy = copyOf(value, key, depth, seen)
+
+	seen.set(value, copy)
+
+	return copy
+}
+
+function copyOf(value: object, key: string, depth: number, seen: Seen): unknown {
+	if (Array.isArray(value)) return value.map((item) => clean(item, '', depth + 1, seen))
+
+	// У `Error` поля не перечисляются, а `Date` и `URL` видны только через `toJSON`:
+	// без этого до нормализации SDK от них остался бы пустой объект.
+	if (value instanceof Error)
+		return { name: scrub(value.name), message: scrub(value.message), stack: scrub(value.stack ?? '') }
+
+	const { toJSON } = value as { toJSON?: unknown }
+
+	if (typeof toJSON === 'function') {
+		try {
+			return clean(toJSON.call(value), key, depth + 1, seen)
+		} catch {
+			// Сломанный `toJSON`: проходим объект как обычный.
+		}
+	}
 
 	// Имя ключа тоже бывает секретом: токен как ключ словаря сессий.
-	return Object.fromEntries(Object.entries(value).map(([k, v]) => [scrub(k), clean(v, k, depth + 1)]))
+	return Object.fromEntries(Object.entries(value).map(([k, v]) => [scrub(k), clean(v, k, depth + 1, seen)]))
 }
 
 /**
@@ -191,7 +223,7 @@ function clean(value: unknown, key: string, depth: number): unknown {
  * вложенность: глубже предела объект уходит целиком в `[Filtered]`.
  */
 export function scrubValue(value: unknown): unknown {
-	return clean(value, '', 0)
+	return clean(value, '', 0, new WeakMap())
 }
 
 type Exception = {

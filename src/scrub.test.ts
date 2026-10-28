@@ -314,6 +314,51 @@ describe('scrubEvent', () => {
 		assert.equal((extra as Record<string, unknown>)['http.request.header.authorization'], FILTERED)
 	})
 
+	test('до нормализации: много ссылок на один объект проходятся один раз', () => {
+		// Десять ссылок назад в цикл и по десять ссылок на общую ветку на восьми уровнях:
+		// обход каждой ссылки занял бы 10^8 шагов.
+		const loop: Record<string, unknown> = { note: `token=${KAITEN}` }
+		let shared: Record<string, unknown> = { note: `Bearer ${KAITEN}` }
+
+		for (let i = 0; i < 10; i++) loop[`back${i}`] = loop
+
+		for (let level = 0; level < 8; level++) {
+			const next: Record<string, unknown> = {}
+
+			for (let i = 0; i < 10; i++) next[`ref${i}`] = shared
+
+			shared = next
+		}
+
+		const started = Date.now()
+		const extra = scrubValue({ loop, shared }) as Record<string, Record<string, unknown>>
+
+		assert.ok(Date.now() - started < 1000, `${Date.now() - started} мс`)
+		assert.equal(extra.loop?.note, `token=${FILTERED}`)
+		assert.equal(extra.loop?.back9, FILTERED, 'ссылка назад в цикл')
+
+		let bottom: unknown = extra.shared
+
+		while (bottom && typeof bottom === 'object' && 'ref0' in bottom) bottom = bottom.ref0
+
+		assert.deepEqual(bottom, { note: `Bearer ${FILTERED}` })
+	})
+
+	test('до нормализации: Error, Date и URL не теряют содержимое', () => {
+		const error = new Error(`Kaiten 401: Bearer ${KAITEN}`)
+		const value = scrubValue({
+			error,
+			at: new Date(0),
+			url: new URL('https://kaiten.example/cb?code=abc'),
+		}) as { error: { name: string; message: string; stack: string }; at: string; url: string }
+
+		assert.equal(value.error.name, 'Error')
+		assert.equal(value.error.message, `Kaiten 401: Bearer ${FILTERED}`)
+		assert.ok(value.error.stack.includes('scrub.test.ts') && !value.error.stack.includes(KAITEN))
+		assert.equal(value.at, '1970-01-01T00:00:00.000Z')
+		assert.equal(value.url, `https://kaiten.example/cb?code=${FILTERED}`)
+	})
+
 	test('query запроса объектом или парами теряет значения, имена остаются', () => {
 		const object = scrubEvent({ request: { query_string: { token: 't', q: 'x', [JWT]: '' } } })
 		const pairs = scrubEvent({

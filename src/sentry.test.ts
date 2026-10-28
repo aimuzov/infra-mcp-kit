@@ -279,6 +279,23 @@ describe('sentry', () => {
 		assert.deepEqual(sent, [])
 	})
 
+	test('событие мимо `beforeSend` не уходит, хоть часть конверта у него и `event`', async () => {
+		core.withScope((scope) => {
+			scope.setUser({ email: 'person@example.com' })
+			scope.setExtra('token', PLANTED)
+			// `beforeSend` SDK зовёт только для событий без `type`, а для `__sentry__` -- ни его,
+			// ни процессоры. Часть конверта при этом `event`.
+			core.captureEvent({ type: 'replay_event', message: `upstream ${PLANTED}` } as never)
+			core.captureEvent({ type: 'event', message: `upstream ${PLANTED}` } as never)
+			core.captureException(new Error(`upstream ${PLANTED}`), { data: { __sentry__: true } })
+		})
+
+		await events()
+
+		assert.deepEqual(sent, [])
+		assert.deepEqual(others, [])
+	})
+
 	test('ошибка инструмента уходит клиенту ответом и в Sentry с тегом, но без аргументов и текста', async () => {
 		const response = await call(server(), 'pay')
 

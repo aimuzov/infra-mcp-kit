@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { inspect } from 'node:util'
-import type { BaseTransportOptions, Envelope, Event, EventHint, Transport } from '@sentry/core'
+import type { BaseTransportOptions, Envelope, ErrorEvent, Event, EventHint, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
 import { strictCopy, strictError, strictEvent } from './sentry-event.ts'
@@ -90,7 +90,7 @@ export async function initSentry({ name, version, env = process.env, transport }
 		},
 		// `dataCollection` не касается текста ошибок, тегов и того, что сервер положил в scope:
 		// событие собирается заново только из разрешённых полей.
-		beforeSend: strictEvent,
+		beforeSend: (event: ErrorEvent, hint: EventHint) => sealed(strictEvent(event, hint)),
 		beforeBreadcrumb: () => null,
 		// Без `eventFiltersIntegration`: текста в событии нет, и фильтровать по нему нечего,
 		// а копию без кадров и без кода он отбросил бы как бесполезную.
@@ -168,10 +168,21 @@ function foreignReporter(): Reporter | undefined {
 const isClosed = (client: ForeignClient) =>
 	Symbol.for('SentryClosedClient') in client || client.getOptions?.().enabled === false
 
+/** События, которые кит собрал в `beforeSend`: SDK кладёт в конверт тот же объект. */
+const strict = new WeakSet<object>()
+
+function sealed<T extends object>(event: T) {
+	strict.add(event)
+
+	return event
+}
+
 /**
- * Наружу только события ошибок: их кит собирает сам в `beforeSend`. Остальное клиент шлёт мимо
- * него, со scope той же копии `@sentry/core`: сессию с id и адресом посетителя, логи и метрики
- * с его почтой, отзывы с `extra`, транзакции и вложения.
+ * Наружу только события, собранные китом в `beforeSend`. Остальное клиент шлёт мимо него,
+ * со scope той же копии `@sentry/core`: сессию с id и адресом посетителя, логи и метрики с его
+ * почтой, отзывы с `extra`, транзакции и вложения. И часть `event` не всегда прошла `beforeSend`:
+ * SDK зовёт его только для событий без `type`, а событие с `data.__sentry__` (так SDK сообщает
+ * о своей же поломке) не пускает ни в него, ни в процессоры.
  */
 const eventsOnly =
 	(make: (options: BaseTransportOptions) => Transport) =>
@@ -180,7 +191,7 @@ const eventsOnly =
 
 		return {
 			send([header, items]) {
-				const events = items.filter(([item]) => item.type === 'event')
+				const events = items.filter(([item, body]) => item.type === 'event' && strict.has(body as object))
 
 				return events.length ? transport.send([header, events] as Envelope) : Promise.resolve({})
 			},

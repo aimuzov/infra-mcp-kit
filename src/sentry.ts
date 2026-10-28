@@ -1,9 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { hostname } from 'node:os'
-import type { BaseTransportOptions, Transport } from '@sentry/core'
+import type { BaseTransportOptions, Event, EventHint, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
-import { scrub, scrubBreadcrumb, scrubEvent } from './scrub.ts'
+import { strictCopy, strictError, strictEvent } from './sentry-event.ts'
 
 type Tags = Record<string, string>
 type Core = typeof import('@sentry/core')
@@ -20,7 +19,7 @@ type ForeignScope = {
 	clone(): ForeignScope
 	setTags(tags: Tags): unknown
 	captureException(error: unknown): unknown
-	addEventProcessor(processor: <T extends object>(event: T) => T): unknown
+	addEventProcessor(processor: (event: Event, hint: EventHint) => Event): unknown
 	getClient(): ForeignClient | undefined
 }
 type ForeignClient = {
@@ -86,10 +85,10 @@ export async function initSentry({ name, version, env = process.env, transport }
 			queues: false,
 			stackFrameVariables: false,
 		},
-		// Текст ошибок пишет апстрим, и `dataCollection` его не касается: секреты из него
-		// вычищает `scrubEvent`.
-		beforeSend: scrubEvent,
-		beforeBreadcrumb: scrubBreadcrumb,
+		// `dataCollection` не касается текста ошибок, тегов и того, что сервер положил в scope:
+		// событие собирается заново только из разрешённых полей.
+		beforeSend: strictEvent,
+		beforeBreadcrumb: () => null,
 		integrations: [
 			sentry.eventFiltersIntegration(),
 			sentry.functionToStringIntegration(),
@@ -99,7 +98,6 @@ export async function initSentry({ name, version, env = process.env, transport }
 		transport: transport ?? fetchTransport(sentry),
 		platform: 'node',
 		runtime: { name: 'node', version: process.version },
-		serverName: hostname(),
 	})
 
 	reporter = {
@@ -136,9 +134,9 @@ function foreignReporter(): Reporter | undefined {
 				const scope = current()!.clone()
 
 				scope.setTags(tags)
-				// `beforeSend` чужого клиента кит не ставит, поэтому чистит свои события процессором
-				// на копии scope: остальные события сервера он не трогает.
-				scope.addEventProcessor(scrubEvent)
+				// `beforeSend` чужого клиента кит не ставит, поэтому строгим делает своё событие
+				// процессором на копии scope: остальные события сервера он не трогает.
+				scope.addEventProcessor(strictEvent)
 				scope.captureException(error)
 			},
 			flush: (timeout) => client.flush(timeout),
@@ -184,95 +182,27 @@ async function fatal(error: unknown) {
 	if (dying) return
 
 	dying = true
-	// Копия: отправленную раньше ошибку Sentry помечает и второй раз не шлёт, а падение процесса --
-	// отдельное событие.
-	send(error instanceof Error ? copyOf(error) : error, { fatal: 'true' })
+	// Свежая копия мимо кэша: отправленную раньше ошибку Sentry помечает и второй раз не шлёт,
+	// а падение процесса -- отдельное событие.
+	send(strictCopy(error), { fatal: 'true' })
 	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
 	await flushSentry().catch(() => {})
-	process.stderr.write(`${scrub(error instanceof Error ? (error.stack ?? String(error)) : String(error))}\n`)
+	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
 	process.exit(1)
 }
 
-const copyOf = (error: Error) =>
-	Object.assign(new Error(error.message, { cause: error.cause }), { name: error.name, stack: error.stack })
-
 /**
  * Отправить ошибку, которую кит поймал и превратил в ответ. Без Sentry ничего не делает.
+ * Уходит строгая копия, см. `strictError`: тип, код и кадры стека, без текста ошибки.
  * Одну ошибку могут поймать двое, например обработчик и HTTP-слой над ним: тот же объект
  * Sentry второй раз не шлёт, а разные случаи с одинаковым стеком уходят каждый.
  */
 export function captureError(error: unknown, tags?: Tags): void {
-	send(error, tags)
+	if (reporter) send(strictError(error), tags)
 }
 
-function send(error: unknown, tags?: Tags) {
-	reporter?.capture(safe(error), { ...tagged.getStore(), ...tags })
-}
-
-/**
- * Ошибка для Sentry без текста: тип, код и стек исходной. Так кит отправляет ошибку входа:
- * её текст пишет апстрим, и в нём бывает то, что человек ввёл в форму, или ответ сервиса
- * с его токеном. Код -- `code` из Node и undici вроде `ECONNREFUSED` или HTTP-статус.
- */
-export function withoutMessage(error: unknown): Error {
-	const name = error instanceof Error && /^[\w$.]{1,60}$/.test(error.name) ? error.name : 'Error'
-	const code = codeOf(error) ?? codeOf((error as { cause?: unknown } | null)?.cause)
-	const copy = new Error(code === undefined ? '' : String(code))
-	const frames = error instanceof Error ? framesOf(error) : []
-
-	copy.name = name
-	copy.stack = [String(copy), ...frames].join('\n')
-
-	return copy
-}
-
-/**
- * Строки кадров без заголовка стека. Заголовок -- текст ошибки, и строка в нём вида
- * `    at ...` иначе ушла бы кадром. Если текст поменяли после создания, границу
- * заголовка не найти: тогда кадры ещё и чистим от секретов.
- */
-function framesOf(error: Error): string[] {
-	const stack = error.stack ?? ''
-	const head = String(error)
-	const lines = stack.startsWith(head)
-		? stack.slice(head.length).split('\n')
-		: stack.split('\n').slice(error.message.split('\n').length)
-
-	return lines.filter((line) => /^\s+at /.test(line)).map(scrub)
-}
-
-function codeOf(error: unknown): string | number | undefined {
-	if (error === null || typeof error !== 'object') return undefined
-
-	const { code, status, statusCode } = error as Record<string, unknown>
-
-	if (typeof code === 'string' && /^[A-Z][A-Z\d_]{1,40}$/.test(code)) return code
-
-	for (const value of [code, status, statusCode])
-		if (Number.isInteger(value) && (value as number) >= 100 && (value as number) < 600) return value as number
-
-	return undefined
-}
-
-const replaced = new WeakMap<object, Error>()
-
-/**
- * Не `Error` уходит заменой: брошенный объект Sentry кладёт в событие целиком, а в нём
- * бывают аргументы инструмента. Строку оставляем, это тот же текст ошибки. Замена
- * для объекта одна и та же, чтобы повтор узнавался, как у `Error`.
- */
-function safe(error: unknown): Error {
-	if (error instanceof Error) return error
-
-	if (typeof error === 'string') return new Error(error)
-
-	const replacement = new Error(`Non-Error thrown: ${error === null ? 'null' : typeof error}`)
-
-	if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return replacement
-
-	if (!replaced.has(error)) replaced.set(error, replacement)
-
-	return replaced.get(error)!
+function send(copy: Error, tags?: Tags) {
+	reporter?.capture(copy, { ...tagged.getStore(), ...tags })
 }
 
 /**

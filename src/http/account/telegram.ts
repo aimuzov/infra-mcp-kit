@@ -14,7 +14,7 @@ import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, hostCookie, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
 import { messageOf } from '#kit/results'
-import { captureError, withoutMessage } from '#kit/sentry'
+import { captureError } from '#kit/sentry'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
@@ -131,9 +131,10 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 			try {
 				cookie = await session.cookie({ ...claimsOf(user), sub: user.id })
 			} catch (error) {
-				// Как у OAuth-входа: claims собирает сервис, и в тексте его ошибки может быть что угодно.
+				// Claims собирает сервис, и его сбой -- такая же неудача входа, как у OAuth: человек
+				// видит страницу входа с просьбой зайти позже, а не общую 500.
 				context.logger.error('account login failed', { message: messageOf(error) })
-				captureError(withoutMessage(error), { 'http.path': url.pathname })
+				captureError(error, { 'http.path': url.pathname })
 
 				return fail('server.later')
 			}

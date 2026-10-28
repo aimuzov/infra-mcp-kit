@@ -1,7 +1,6 @@
 import { parseLogLevel } from './log.ts'
 import type { McpServer } from './mcp.ts'
 import { messageOf } from './results.ts'
-import { scrub } from './scrub.ts'
 import { captureError, flushSentry, initSentry } from './sentry.ts'
 import { serveStdio } from './stdio.ts'
 
@@ -70,13 +69,12 @@ export async function runCli({
 
 		await run(args)
 	} catch (error) {
-		console.error(`${name}: ${scrub(messageOf(error))}`)
+		console.error(`${name}: ${messageOf(error)}`)
 		captureError(error)
 		await flushSentry()
 
 		// Для своих ошибок хватает строки, а неожиданный TypeError без стека не найти.
-		if (parseLogLevel(process.env.LOG_LEVEL) === 'debug' && error instanceof Error)
-			console.error(scrub(error.stack ?? ''))
+		if (parseLogLevel(process.env.LOG_LEVEL) === 'debug' && error instanceof Error) console.error(error.stack)
 
 		process.exitCode = 1
 	}

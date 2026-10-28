@@ -67,44 +67,28 @@ Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. 
 
 - The release is `<name>@<version>` from `runCli`, so `name` should match the Sentry project. The environment is `production`, `SENTRY_ENVIRONMENT` changes it for a local check.
 - Sent: uncaught exceptions and rejections (the process still exits with 1, once the event is out), errors of tool, prompt and resource handlers, including the ones the client gets back as `isError`, tagged `mcp.tool`, `mcp.prompt` or `mcp.resource`, failed HTTP, `/mcp` and OAuth requests and sign-ins tagged `http.path`, and an error that stops `runCli`.
-- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies and local variables. Only the error message and the stack leave, and the kit cleans secrets out of the message, [see below](#secrets-in-reports-and-logs). User data still has no place in error messages.
+- Kept on the server: tool arguments and results, headers, bodies, query strings, cookies, local variables and the error message itself. Only the error type, its code and the stack frames leave, [see below](#what-reaches-sentry).
 - Errors only, no traces. The client is `@sentry/core` instead of `@sentry/node`: 13 MB instead of 80, no OpenTelemetry and no breadcrumbs from the console or outgoing requests.
 - A server that called `Sentry.init` itself before `runCli`, from any SDK version, gets no second client: the kit sends its errors through the server's client with the same tags and does not read `SENTRY_DSN`.
 - A server without `runCli` calls `await initSentry({ name, version })` itself. `captureError(error, tags)` sends an error the server caught on its own, `withTags(tags, run)` tags every error inside `run`.
 
-### Secrets in reports and logs
+### What reaches Sentry
 
-An error message is written by whoever threw the error, most often the upstream. It can carry tokens and request URLs. Before sending, `scrubEvent` walks the exception messages and their stack frames, the message, `extra`, `contexts`, tags, the request, breadcrumbs and spans and replaces secrets with `[Filtered]`:
+An error message is written by whoever threw the error, most often the upstream, and it can carry a token, a request URL or the body the person sent. Rules that look for secrets in it miss the next format, so the kit doesn't send the message at all. Every event is built anew from a fixed list, and anything not on it stays on the server:
 
-- JWT and JWE (`eyJ...` with dots) and the value after `Bearer` or `Basic`.
-- UUIDs, hex of 32 characters and more, and long base64url strings with digits or mixed case. Long names made of words, like `getOAuthProtectedResourceMetadataUrl`, stay.
-- A Telegram bot token (`123456:AA...`), including inside a `/bot<token>/` URL.
-- Query and fragment values (`?token=`, `?code=`, `?state=`, `#access_token=`) and form body pairs. Parameter names stay. In fields that hold a query, like `request.query_string` or `http.query`, a segment without `=` is a value too.
-- Userinfo in a URL: `https://user:pass@host`.
-- Values of `Authorization`, `Cookie` and `Set-Cookie` headers in text, including arrays, `[name, value]` pairs and `Map` from `util.inspect`, and of keys like `token`, `secret`, `password`, `api_key`: `KAITEN_API_TOKEN=...`, `"client_secret": "..."`, `password: swordfish`. A word about the state after a bare colon stays: `token: expired`, `password: required`. So does a model token count: `max_tokens=4096`.
-- Any value under such a key in `extra`, `contexts`, breadcrumbs and spans, numbers included.
-- In the event's request, the body and cookies as a whole, and `Authorization`, `Cookie`, `X-Api-Key` and similar headers.
+- The error type, `TypeError` or `HttpError`, and its code instead of the message: `code` from Node and undici like `ECONNREFUSED` or `ERR_INVALID_URL`, or an HTTP status from `code`, `status` or `statusCode`. Without a code the message is empty. A thrown non-`Error` leaves as `Non-Error thrown: object` (`string`, `null` and so on), without what was thrown.
+- Stack frames: function, file, line and column, redrawn from the parsed parts, up to 50. The home directory in a path becomes `~`: on the machine of a stdio server's user it holds their name. A line of the message that looks like `    at ...` does not become a frame.
+- The `cause` chain, up to five deep, built the same way. So `fetch failed` shows `ECONNREFUSED` as a separate exception.
+- The kit's tags: `mcp.tool`, `mcp.prompt`, `mcp.resource`, `fatal` and `http.path`. In `http.path` a segment with digits or longer than 32 characters becomes `*`: `/bot<token>/getMe` leaves as `/*/getMe`.
+- The release, the environment, the Node version and the trace id.
 
-A sign-in error (OAuth callback, token form, Telegram, account sign-in) leaves with no message at all, only the type and a code: `ECONNREFUSED` or an HTTP status. Its message comes from the service the person has just handed a token to, and no set of rules can guess every token format. `withoutMessage(error)` gives the server the same copy of its own error.
+Not sent: the error message, the request, its headers and cookies, breadcrumbs, `extra`, `user`, other contexts, scope attachments and the machine name.
 
-The kit's logger cleans every line for stderr and `LOG_FILE`: the message with `scrub(text)`, and the `meta` object with `scrubValue(value)` before it becomes JSON. In ready JSON quotes and line breaks are escaped, and the rules no longer see them. `runCli` cleans the error line it stops on the same way. A custom `logger` given to `createHttpApp` or `tool` gets the text as is, so clean it yourself the same way: `scrub` for the message, `scrubValue` for `meta` before serializing.
+The full text stays in the log: stderr and `LOG_FILE` keep the message as is, they belong to whoever runs the server. Look up the text of a Sentry event there by its time and the `mcp.tool` or `http.path` tag.
 
-A service adds rules for its own secrets once at startup, before `runCli`. They run before the built-in ones and apply both to Sentry and to the log:
+Tags the service passes to `captureError` or `withTags` itself leave as they are, apart from `http.path`. So do tags on the scope of the server's own client. Keep user data and secrets out of them.
 
-```ts
-import { addScrubRules } from '@aimuzov/infra-mcp-kit'
-
-addScrubRules(
-	// The service's own token format: every match becomes `[Filtered]`, the kit adds the `g` flag itself.
-	/kt_[A-Za-z0-9]{24}/,
-	// The exact secret value. An empty string is skipped.
-	process.env.UPSTREAM_TOKEN ?? '',
-	// A custom replacement: takes the text, returns it clean.
-	(text) => text.replace(/card \d+/g, 'card [id]'),
-)
-```
-
-If the server set up Sentry itself, the kit cleans only its own events, with a processor on a copy of the scope. For the rest, add `beforeSend: scrubEvent`, `beforeSendSpan: scrubSpan` and `beforeBreadcrumb: scrubBreadcrumb` to your `Sentry.init`. SDK 11 streams spans by default and ignores `beforeSendTransaction`; with `traceLifecycle: 'static'` spans go inside the transaction, so set `beforeSendTransaction: scrubEvent` instead of `beforeSendSpan`.
+If the server set up Sentry itself, the kit builds only its own events this way, with a processor on a copy of the scope. The server's own events are its own business: the kit doesn't touch them.
 
 ## HTTP and OAuth
 

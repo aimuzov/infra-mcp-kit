@@ -5,7 +5,7 @@ import { kt, requestLocale, type Locale } from '#kit/i18n'
 import { log, type Logger } from '#kit/log'
 import type { AuthInfo } from '#kit/mcp'
 import { messageOf } from '#kit/results'
-import { captureError, withoutMessage } from '#kit/sentry'
+import { captureError } from '#kit/sentry'
 
 import {
 	InvalidClientError,
@@ -288,9 +288,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		} catch (error) {
 			if (!(error instanceof LoginError)) {
 				logger.error('login failed', { message: messageOf(error) })
-				// В Sentry только тип и код: текст ошибки входа пишет апстрим, а ему достались
-				// токен или подпись, которые человек принёс.
-				captureError(withoutMessage(error), { 'http.path': CALLBACK_PATH })
+				captureError(error, { 'http.path': CALLBACK_PATH })
 
 				return fail(locale, kt(locale, 'oauth.failed'), kt(locale, 'server.later'))
 			}

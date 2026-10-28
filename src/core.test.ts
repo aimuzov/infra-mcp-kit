@@ -95,6 +95,16 @@ test('логгер отсекает уровни ниже заданного', (
 	assert.match(lines[0] ?? '', /ERROR keep \{"a":1\}/)
 })
 
+test('meta, которую не перевести в JSON, логгер пишет строкой и не падает', () => {
+	const lines: string[] = []
+	const cyclic: Record<string, unknown> = {}
+
+	cyclic.self = cyclic
+	createLogger({ write: (l) => lines.push(l) }).error('cyclic', cyclic)
+
+	assert.match(lines[0] ?? '', /ERROR cyclic \[object Object\]/)
+})
+
 test('уровень лога: только свои имена, без ключей прототипа', () => {
 	assert.equal(parseLogLevel(' Debug '), 'debug')
 	assert.equal(parseLogLevel('toString'), undefined)

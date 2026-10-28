@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
-import { homedir } from 'node:os'
+import { execFile } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import type { Event, EventHint } from '@sentry/core'
 
 import { strictCopy, strictError, strictEvent } from './sentry-event.ts'
@@ -21,6 +24,22 @@ function withStack(frames: string[], message = 'boom') {
 }
 
 const framesOf = (error: Error) => error.stack!.split('\n').slice(1)
+
+/** Кадры строгой копии в отдельном процессе с другим `HOME`: домашний каталог кит читает один раз. */
+async function framesWithHome(home: string, frames: string[]): Promise<string[]> {
+	const script = `
+		const { strictError } = await import(${JSON.stringify(new URL('./sentry-event.ts', import.meta.url).href)})
+		const error = new Error('x')
+
+		error.stack = ['Error: x', ...${JSON.stringify(frames)}].join('\\n')
+		console.log(JSON.stringify(strictError(error).stack.split('\\n').slice(1)))
+	`
+	const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
+		env: { ...process.env, HOME: home },
+	})
+
+	return JSON.parse(stdout) as string[]
+}
 
 test('strictError: тип и код вместо текста', () => {
 	const copy = strictError(Object.assign(new TypeError(`GET /api?token=${PLANTED}`), { code: 'ECONNREFUSED' }))
@@ -103,6 +122,49 @@ test('текст, изменённый после создания: кадры -
 
 	trailing.message = 'y'
 	assert.deepEqual(framesOf(strictError(trailing)), ['    at real (/srv/app.js:1:1)'])
+
+	// Текст обрезали до первой строки: заголовок совпал, и строки прежнего текста идут сразу
+	// за ним. Адрес с параметрами и заголовок под путь не подходят.
+	const truncated = new Error(
+		[
+			'upstream 500',
+			`    at /api/cards?token=${PLANTED}&password=hunter2:1:1`,
+			`    at retry (/srv/{"token":"${PLANTED}"}:1:1)`,
+			`    at retry (/srv/#${PLANTED}:1:1)`,
+		].join('\n'),
+	)
+
+	assert.ok(truncated.stack)
+	truncated.message = 'upstream 500'
+	assert.ok(!strictError(truncated).stack!.includes(PLANTED), strictError(truncated).stack!)
+})
+
+test('кадры идут сплошным блоком за заголовком: дописанный стек вложенной ошибки не в счёт', () => {
+	// Так делают nested-error-stacks и похожие: стек вложенной ошибки дописан вместе с её текстом.
+	const inner = new Error(`upstream said:\n    at leak (/srv/${PLANTED}.js:1:1)`)
+	const outer = withStack(['    at real (/srv/app.js:1:1)', '    at eval (eval at <anonymous> (/srv/x.js:1:1))'])
+
+	outer.stack += `\nCaused By: ${inner.stack}`
+
+	assert.deepEqual(framesOf(strictError(outer)), ['    at real (/srv/app.js:1:1)'])
+})
+
+test('заголовок с кодом у ошибок Node отрезается точно', () => {
+	// `RangeError [ERR_X]: ...`: без кода в заголовке разбор шёл бы хвостовым блоком, и строка
+	// текста, похожая на кадр, прямо над кадрами стала бы кадром.
+	const error = Object.assign(new RangeError(`bad\n    at leak (/srv/${PLANTED}.js:1:1)`), { code: 'ERR_X' })
+
+	error.stack = [`RangeError [ERR_X]: ${error.message}`, '    at real (/srv/app.js:1:1)'].join('\n')
+	assert.deepEqual(framesOf(strictError(error)), ['    at real (/srv/app.js:1:1)'])
+
+	try {
+		Buffer.alloc(1).readUInt8(5)
+	} catch (thrown) {
+		const node = thrown as Error
+
+		assert.match(node.stack!, /^RangeError \[ERR_OUT_OF_RANGE\]: /)
+		assert.equal(framesOf(strictError(node)).length, framesOf(node).length)
+	}
 })
 
 test('кадры V8 разбираются и рисуются заново, остальное отбрасывается', () => {
@@ -121,6 +183,9 @@ test('кадры V8 разбираются и рисуются заново, о�
 		'    at async file:///srv/app/main.mjs:3:1',
 		'    at C:\\srv\\app.js:1:1',
 		'    at ModuleJob.run (C:/srv/app.js:1:1)',
+		'    at f (/srv/node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope/pkg/x.js:1:1)',
+		'    at f (/srv/app/[slug]/$id.js:1:1)',
+		'    at file:///srv/My%20App/x.mjs:1:1',
 	]
 	const dropped = [
 		'    at eval (eval at <anonymous> (/srv/x.js:1:1), <anonymous>:1:1)',
@@ -134,10 +199,14 @@ test('кадры V8 разбираются и рисуются заново, о�
 		'    at relative/x.js:1:1',
 		`    at ${'f'.repeat(201)} (/srv/x.js:1:1)`,
 		`    at f (/srv/${'x'.repeat(1000)}.js:1:1)`,
-		'Caused by: something',
+		`    at f (/srv/x.js?token=${PLANTED}:1:1)`,
+		`    at /api?token=${PLANTED}&password=x:1:1`,
+		`    at f (/srv/'${PLANTED}':1:1)`,
+		'    at f (/srv/x\tjs:1:1)',
 	]
 
 	assert.deepEqual(framesOf(strictError(withStack([...kept, ...dropped]))), kept)
+	assert.deepEqual(framesOf(strictError(withStack([...kept, 'Caused by: something', ...kept]))), kept)
 	assert.equal(framesOf(strictError(withStack(Array(80).fill('    at f (/srv/x.js:1:1)')))).length, 50)
 })
 
@@ -155,6 +224,47 @@ test('домашний каталог в пути становится ~', () =>
 		'    at ~/project/build/tool.mjs:3:7',
 		`    at other (${HOME}-backup/x.js:1:1)`,
 	])
+})
+
+test('домашний каталог со слэшем на конце, за симлинком и в другом регистре', async () => {
+	// Настоящий путь: на macOS сам `tmpdir()` за симлинком.
+	const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-home-')))
+
+	try {
+		const real = join(root, 'Real')
+		const link = join(root, 'link')
+
+		mkdirSync(real)
+		symlinkSync(real, link)
+
+		// `$HOME` со слэшем на конце Node отдаёт как есть.
+		assert.deepEqual(await framesWithHome(`${real}//`, [`    at run (${real}/project/index.js:1:1)`]), [
+			'    at run (~/project/index.js:1:1)',
+		])
+
+		// В стек Node пишет настоящий путь, а `$HOME` -- симлинк.
+		assert.deepEqual(await framesWithHome(link, [`    at run (${real}/project/index.js:1:1)`]), [
+			'    at run (~/project/index.js:1:1)',
+		])
+
+		// На macOS и Windows `/users/alice` -- тот же каталог, что `/Users/alice`.
+		const folds = process.platform === 'darwin' || process.platform === 'win32'
+		const lower = `    at run (${real.toLowerCase()}/project/index.js:1:1)`
+
+		assert.deepEqual(await framesWithHome(real, [lower]), [folds ? '    at run (~/project/index.js:1:1)' : lower])
+
+		// Корень домашним каталогом не считается.
+		assert.deepEqual(await framesWithHome('/', ['    at run (/srv/index.js:1:1)']), [
+			'    at run (/srv/index.js:1:1)',
+		])
+
+		// Каталога нет, настоящий путь не узнать: хватает `$HOME` как есть.
+		assert.deepEqual(await framesWithHome(join(root, 'gone'), [`    at run (${root}/gone/index.js:1:1)`]), [
+			'    at run (~/index.js:1:1)',
+		])
+	} finally {
+		rmSync(root, { recursive: true, force: true })
+	}
 })
 
 test('цепочка cause: такие же копии, циклы обрываются, глубина не больше пяти', () => {
@@ -185,6 +295,34 @@ test('цепочка cause: такие же копии, циклы обрыва�
 	assert.equal(depth, 5)
 })
 
+test('ошибка без разбираемых кадров получает кадры места, где её поймали', () => {
+	// Событие без кадров, кода и текста SDK отбрасывает как бесполезное.
+	const limit = Error.stackTraceLimit
+
+	Error.stackTraceLimit = 0
+
+	const limited = new Error('x')
+
+	Error.stackTraceLimit = limit
+
+	const deleted = Object.assign(new Error('x'), { stack: undefined })
+	const foreign = withStack([
+		`    at f (C:\\Program Files (x86)\\app\\x.js:1:1)`,
+		'    at eval (eval at f (/srv/x.js:1:1))',
+	])
+
+	for (const error of [limited, deleted, foreign]) {
+		const frames = framesOf(strictError(error))
+
+		assert.ok(frames.length > 0)
+
+		assert.ok(
+			frames.some((frame) => frame.includes('sentry-event.test.ts')),
+			frames.join('\n'),
+		)
+	}
+})
+
 test('свойство-геттер, который бросает, не ломает копию', () => {
 	const error = new Error('x')
 
@@ -199,7 +337,12 @@ test('свойство-геттер, который бросает, не лом�
 
 	assert.equal(copy.name, 'Error')
 	assert.equal(copy.message, '')
-	assert.equal(copy.stack, 'Error')
+
+	// Без своих кадров у копии кадры того места, где кит поймал ошибку.
+	assert.ok(
+		framesOf(copy).some((frame) => frame.includes('sentry-event.test.ts')),
+		copy.stack!,
+	)
 
 	// Стек читается, а заголовок не собрать: кадры берутся блоком из конца стека.
 	const nameless = withStack(['    at real (/srv/app.js:1:1)'])
@@ -257,11 +400,15 @@ test('strictEvent оставляет только разрешённые пол�
 		},
 		contexts: {
 			trace: { trace_id: 'b'.repeat(32), span_id: 'c'.repeat(16), data: { url: PLANTED }, description: PLANTED },
-			runtime: { name: 'node', version: 'v26.0.0', nested: { token: PLANTED } },
-			os: { name: 'Linux', long: PLANTED.repeat(10) },
-			culture: { timezone: 'Europe/Moscow', is_24_hour_format: true, calendar: 1 },
+			runtime: { name: 'node', version: 'v26.0.0', nested: { token: PLANTED }, token: PLANTED },
+			os: { name: 'Linux', kernel_version: PLANTED.repeat(10), token: PLANTED },
+			app: { app_memory: 1, app_start_time: '2026-01-01T00:00:00.000Z', token: PLANTED, app_name: PLANTED },
+			device: { arch: 'arm64', processor_count: 8, name: 'alice-macbook', device_unique_identifier: PLANTED },
+			culture: { locale: 'ru-RU', timezone: 'Europe/Moscow', is_24_hour_format: true, display_name: PLANTED },
+			cloud_resource: { 'cloud.provider': 'aws', 'cloud.region': 'eu-west-1', 'cloud.account.id': PLANTED },
 			custom: { token: PLANTED },
 			response: { status_code: 500 },
+			toString: { token: PLANTED },
 		},
 		exception: {
 			values: [
@@ -286,13 +433,17 @@ test('strictEvent оставляет только разрешённые пол�
 			],
 		},
 	}
-	const hint: EventHint = { attachments: [{ filename: 'a.txt', data: PLANTED }] }
+	const hint: EventHint = {
+		attachments: [{ filename: 'a.txt', data: PLANTED }],
+		originalException: strictError(new Error('x')),
+	}
 	const strict = strictEvent(event as unknown as Event, hint)
 	const { filename: _, vars: _vars, context_line: _line, pre_context: _pre, debug_id: _id, ...fields } = frame
 
 	assert.equal(hint.attachments, undefined, 'вложения не уходят')
 	assert.ok(!JSON.stringify(strict).includes(PLANTED), JSON.stringify(strict))
 	assert.ok(!JSON.stringify(strict).includes(HOME))
+	assert.ok(!JSON.stringify(strict).includes('alice-macbook'))
 
 	assert.deepEqual(strict, {
 		event_id: 'a'.repeat(32),
@@ -308,7 +459,10 @@ test('strictEvent оставляет только разрешённые пол�
 			trace: { trace_id: 'b'.repeat(32), span_id: 'c'.repeat(16) },
 			runtime: { name: 'node', version: 'v26.0.0' },
 			os: { name: 'Linux' },
-			culture: { timezone: 'Europe/Moscow', is_24_hour_format: true, calendar: 1 },
+			app: { app_memory: 1, app_start_time: '2026-01-01T00:00:00.000Z' },
+			device: { arch: 'arm64', processor_count: 8 },
+			culture: { locale: 'ru-RU', timezone: 'Europe/Moscow' },
+			cloud_resource: { 'cloud.provider': 'aws', 'cloud.region': 'eu-west-1' },
 		},
 		exception: {
 			values: [
@@ -335,8 +489,40 @@ test('strictEvent оставляет только разрешённые пол�
 	})
 
 	assert.deepEqual(strictEvent({ tags: { 'http.path': '/' } } as Event), { tags: { 'http.path': '/' } })
+
+	assert.deepEqual(strictEvent({ tags: { 'http.path': '/users/@alice/a+b/a:b/%D0%B0/ok' } } as Event), {
+		tags: { 'http.path': '/users/*/*/*/*/ok' },
+	})
+
 	assert.deepEqual(strictEvent({ tags: { 'http.path': `/${'a/'.repeat(150)}` } } as Event), { tags: {} })
 	assert.deepEqual(strictEvent({ level: 'secret', exception: {} } as unknown as Event), {})
+})
+
+test('кадры события только у строгой копии кита', () => {
+	// Сервер отдал SDK ошибку сам, мимо `captureError`: кадры SDK разобрал из её исходного стека,
+	// вместе со строками текста. Тип и разрешённый код остаются.
+	const event = {
+		exception: {
+			values: [
+				{
+					type: 'TypeError',
+					value: 'ECONNREFUSED',
+					stacktrace: { frames: [{ filename: '/srv/leak.js', function: 'retry', lineno: 1 }] },
+				},
+			],
+		},
+	} as Event
+
+	for (const hint of [undefined, {}, { originalException: new Error('x') }, { originalException: 'x' }])
+		assert.deepEqual(strictEvent(event, hint), {
+			exception: { values: [{ type: 'TypeError', value: 'ECONNREFUSED' }] },
+		})
+
+	for (const original of [strictError(new Error('x')), strictCopy('x')])
+		assert.equal(
+			strictEvent(event, { originalException: original }).exception?.values?.[0]?.stacktrace?.frames?.length,
+			1,
+		)
 })
 
 // Пороги с запасом в десятки раз: квадратичный разбор на таком входе шёл бы минуты.

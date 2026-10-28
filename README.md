@@ -77,18 +77,20 @@ Set `SENTRY_DSN`, and `runCli` turns on error reports before it runs a command. 
 An error message is written by whoever threw the error, most often the upstream, and it can carry a token, a request URL or the body the person sent. Rules that look for secrets in it miss the next format, so the kit doesn't send the message at all. Every event is built anew from a fixed list, and anything not on it stays on the server:
 
 - The error type, `TypeError` or `HttpError`, and its code instead of the message: `code` from Node and undici like `ECONNREFUSED` or `ERR_INVALID_URL`, or an HTTP status from `code`, `status` or `statusCode`. Without a code the message is empty. A thrown non-`Error` leaves as `Non-Error thrown: object` (`string`, `null` and so on), without what was thrown.
-- Stack frames: function, file, line and column, redrawn from the parsed parts, up to 50. The home directory in a path becomes `~`: on the machine of a stdio server's user it holds their name. A line of the message that looks like `    at ...` does not become a frame.
+- Stack frames: function, file, line and column, redrawn from the parsed parts, up to 50. A path is made only of letters, digits, spaces and `_.~@+%$:/\[]-`, so no query string or header fits in it. The home directory in a path becomes `~`: on the machine of a stdio server's user it holds their name. The header with the message is cut off exactly, and lines of the message that look like `    at ...` don't become frames. The exception is a message changed after the stack was built, say cut down to its first line: then a line of the old message shaped exactly like a frame passes as one. An error without frames the kit can parse gets the frames of the place where the kit caught it.
 - The `cause` chain, up to five deep, built the same way. So `fetch failed` shows `ECONNREFUSED` as a separate exception.
-- The kit's tags: `mcp.tool`, `mcp.prompt`, `mcp.resource`, `fatal` and `http.path`. In `http.path` a segment with digits or longer than 32 characters becomes `*`: `/bot<token>/getMe` leaves as `/*/getMe`.
-- The release, the environment, the Node version and the trace id.
+- The kit's tags: `mcp.tool`, `mcp.prompt`, `mcp.resource`, `fatal` and `http.path`. In `http.path` a segment stays only if it is made of Latin letters, `.`, `-` and `_` and is up to 32 characters long, any other becomes `*`: `/bot<token>/getMe` leaves as `/*/getMe`, `/users/@alice` as `/users/*`.
+- The release, the environment, the Node version and the trace id. Of the other contexts only the fields the SDK fills in itself, and only a server with its own `@sentry/node` has them: the OS and kernel version, the architecture, CPU and memory, the locale and timezone, the cloud provider and region.
 
-Not sent: the error message, the request, its headers and cookies, breadcrumbs, `extra`, `user`, other contexts, scope attachments and the machine name.
+Not sent: the error message, the request, its headers and cookies, breadcrumbs, `extra`, `user`, other contexts and fields, the device name, the cloud account, scope attachments, the dynamic sampling context of the incoming request and the machine name.
 
-The full text stays in the log: stderr and `LOG_FILE` keep the message as is, they belong to whoever runs the server. Look up the text of a Sentry event there by its time and the `mcp.tool` or `http.path` tag.
+The full text stays in the log, it belongs to whoever runs the server. Errors of tools, prompts, resources and HTTP requests go to stderr and `LOG_FILE` as is, a crash and an error that stops `runCli` go to stderr. Look up the text of a Sentry event there by its time and the `mcp.tool`, `mcp.prompt`, `mcp.resource` or `http.path` tag.
 
 Tags the service passes to `captureError` or `withTags` itself leave as they are, apart from `http.path`. So do tags on the scope of the server's own client. Keep user data and secrets out of them.
 
 If the server set up Sentry itself, the kit builds only its own events this way, with a processor on a copy of the scope. The server's own events are its own business: the kit doesn't touch them.
+
+If the server calls the same `@sentry/core` as the kit directly, past `captureError`, the error goes through the kit's client and leaves with its type and code but without frames: the SDK parses them from the original stack, where lines of the message can't be told from frames.
 
 ## HTTP and OAuth
 

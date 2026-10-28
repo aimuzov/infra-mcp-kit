@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { inspect } from 'node:util'
 import type { BaseTransportOptions, Event, EventHint, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
@@ -21,6 +22,8 @@ type ForeignScope = {
 	captureException(error: unknown): unknown
 	addEventProcessor(processor: (event: Event, hint: EventHint) => Event): unknown
 	getClient(): ForeignClient | undefined
+	getPropagationContext?(): object
+	setPropagationContext?(context: object): unknown
 }
 type ForeignClient = {
 	flush(timeout: number): PromiseLike<unknown>
@@ -89,11 +92,9 @@ export async function initSentry({ name, version, env = process.env, transport }
 		// событие собирается заново только из разрешённых полей.
 		beforeSend: strictEvent,
 		beforeBreadcrumb: () => null,
-		integrations: [
-			sentry.eventFiltersIntegration(),
-			sentry.functionToStringIntegration(),
-			sentry.linkedErrorsIntegration(),
-		],
+		// Без `eventFiltersIntegration`: текста в событии нет, и фильтровать по нему нечего,
+		// а копию без кадров и без кода он отбросил бы как бесполезную.
+		integrations: [sentry.functionToStringIntegration(), sentry.linkedErrorsIntegration()],
 		stackParser: sentry.createStackParser(nodeStackLineParser()),
 		transport: transport ?? fetchTransport(sentry),
 		platform: 'node',
@@ -132,6 +133,12 @@ function foreignReporter(): Reporter | undefined {
 		return {
 			capture(error, tags) {
 				const scope = current()!.clone()
+				const propagation = scope.getPropagationContext?.()
+
+				// DSC входящего запроса, baggage посетителя и имя транзакции с адресом, SDK кладёт
+				// в заголовок конверта `trace` уже после процессоров. Связь с трейсом остаётся,
+				// а DSC SDK соберёт заново из своих опций: релиз, окружение, ключ DSN.
+				if (propagation) scope.setPropagationContext?.({ ...propagation, dsc: undefined })
 
 				scope.setTags(tags)
 				// `beforeSend` чужого клиента кит не ставит, поэтому строгим делает своё событие
@@ -187,8 +194,21 @@ async function fatal(error: unknown) {
 	send(strictCopy(error), { fatal: 'true' })
 	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
 	await flushSentry().catch(() => {})
-	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
-	process.exit(1)
+
+	try {
+		process.stderr.write(`${describe(error)}\n`)
+	} finally {
+		process.exit(1)
+	}
+}
+
+function describe(error: unknown): string {
+	try {
+		return error instanceof Error ? String(error.stack) : String(error)
+	} catch {
+		// Объект без прототипа или с `toString`, который бросает: печатаем, как Node, не вызывая его.
+		return inspect(error)
+	}
 }
 
 /**

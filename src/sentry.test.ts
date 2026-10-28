@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import { pathToFileURL } from 'node:url'
@@ -38,6 +38,7 @@ const SECRET_QUERY = 'token=abc'
 const PLANTED = 'e3b0c442-98fc-4c14-9afb-f4c8996fb924'
 const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJrYWl0ZW4ifQ.Kq2rCmgVTpD0pXMjWj1EDx1vJmLy3tqB0V4i3x9P0nE'
 const BOT_TOKEN = '7012345678:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw2'
+const TRACE_ID = '1'.repeat(32)
 
 type Frame = { filename?: string; function?: string; in_app?: boolean }
 type Event = {
@@ -204,6 +205,9 @@ describe('sentry', () => {
 			scope.setUser({ id: PLANTED, email: 'person@example.com' })
 			scope.setExtra('token', PLANTED)
 			scope.setContext('upstream', { token: PLANTED })
+			// Контексты с разрешёнными именами уходят только полями, которые заполняет SDK.
+			scope.setContext('app', { token: PLANTED, app_memory: 1 })
+			scope.setContext('device', { name: hostname() })
 			scope.setTag('upstream.token', PLANTED)
 			scope.addBreadcrumb({ message: PLANTED }, 100)
 			scope.addAttachment({ filename: 'token.txt', data: PLANTED })
@@ -229,7 +233,9 @@ describe('sentry', () => {
 			'timestamp',
 		])
 
-		assert.deepEqual(Object.keys(event!.contexts!).sort(), ['runtime', 'trace'])
+		assert.deepEqual(Object.keys(event!.contexts!).sort(), ['app', 'runtime', 'trace'])
+		assert.deepEqual(event!.contexts!.app, { app_memory: 1 })
+		assert.ok(!raw.includes(hostname()), 'имя машины не уходит')
 		// Теги, которые сервис поставил сам, уходят как есть: данным людей в них не место.
 		assert.deepEqual(event?.tags, { 'upstream.token': PLANTED, 'mcp.tool': 'pay' })
 
@@ -267,13 +273,39 @@ describe('sentry', () => {
 		assert.ok(!sent[0]!.raw.includes(SECRET_ARG))
 	})
 
-	test('ошибка промпта уходит с тегом промпта', async () => {
-		await server().receive({ jsonrpc: '2.0', id: 1, method: 'prompts/get', params: { name: 'broken' } })
+	test('ошибка промпта и ресурса: в Sentry тег без текста, текст в логе', async () => {
+		const lines: string[] = []
+		const mcp = new McpServer(
+			{ name: 'kit', version: '3.0.0' },
+			{ logger: createLogger({ write: (line) => lines.push(line) }) },
+		)
 
-		const [event] = await events()
+		mcp.registerPrompt('broken', { description: 'Throws' }, () => {
+			throw new Error(`prompt failed: ${PLANTED}`)
+		})
 
-		assert.equal(event?.tags?.['mcp.prompt'], 'broken')
-		assert.ok(!sent[0]!.raw.includes('prompt failed'))
+		mcp.registerResource('broken', 'kit://broken', { mimeType: 'text/plain' }, () => {
+			throw new Error(`resource failed: ${PLANTED}`)
+		})
+
+		await mcp.receive({ jsonrpc: '2.0', id: 1, method: 'prompts/get', params: { name: 'broken' } })
+		await mcp.receive({ jsonrpc: '2.0', id: 2, method: 'resources/read', params: { uri: 'kit://broken' } })
+
+		const [prompt, resource] = await events()
+
+		assert.equal(prompt?.tags?.['mcp.prompt'], 'broken')
+		assert.equal(resource?.tags?.['mcp.resource'], 'broken')
+		assert.ok(sent.every(({ raw }) => !raw.includes(PLANTED)))
+
+		assert.match(
+			lines[0] ?? '',
+			new RegExp(`prompt failed \\{"prompt":"broken","message":"prompt failed: ${PLANTED}"\\}`),
+		)
+
+		assert.match(
+			lines[1] ?? '',
+			new RegExp(`resource failed \\{"resource":"broken","message":"resource failed: ${PLANTED}"\\}`),
+		)
 	})
 
 	test('ошибка HTTP-маршрута уходит с путём', async () => {
@@ -378,6 +410,62 @@ describe('sentry', () => {
 		assert.ok(frames.some((frame) => frame.filename?.endsWith('sentry.test.ts')))
 
 		for (const secret of [PLANTED, JWT, 'leak']) assert.ok(!sent[0]!.raw.includes(secret), sent[0]!.raw)
+	})
+
+	test('текст, обрезанный до первой строки: прежние строки с адресом не становятся кадрами', async () => {
+		const error = new Error(`upstream 500\n    at /api/cards?token=${PLANTED}&password=hunter2:1:1`)
+
+		assert.ok(error.stack)
+		error.message = error.message.split('\n')[0]!
+		captureError(error)
+
+		const [event] = await events()
+
+		assert.ok(event?.exception?.values[0]?.stacktrace?.frames.length)
+		assert.ok(!sent[0]!.raw.includes(PLANTED), sent[0]!.raw)
+	})
+
+	test('ошибка, отправленная через SDK мимо captureError, уходит без кадров', async () => {
+		// Сервис зовёт ту же копию `@sentry/core`, что у кита: событие идёт через клиент кита,
+		// а кадры SDK разбирает из исходного стека вместе со строками текста.
+		core.captureException(
+			new TypeError(`upstream 401\n    at leak (/srv/${PLANTED}.js:1:1)\n    at /srv/${JWT}:2:2`),
+		)
+
+		const [event] = await events()
+
+		assert.deepEqual(event?.exception?.values, [
+			{ type: 'TypeError', value: '', mechanism: { type: 'generic', handled: true } },
+		])
+
+		assert.ok(!sent[0]!.raw.includes(PLANTED) && !sent[0]!.raw.includes(JWT), sent[0]!.raw)
+	})
+
+	test('ошибка без кадров и без кода не теряется', async () => {
+		const limit = Error.stackTraceLimit
+
+		Error.stackTraceLimit = 0
+
+		const limited = new Error('limited')
+
+		Error.stackTraceLimit = limit
+		captureError(limited)
+		captureError(Object.assign(new Error('deleted'), { stack: undefined }))
+
+		captureError(
+			Object.assign(new Error('eval only'), {
+				stack: 'Error: eval only\n    at eval (eval at f (/srv/x.js:1:1))',
+			}),
+		)
+
+		const all = await events()
+
+		assert.equal(all.length, 3)
+
+		for (const event of all) {
+			assert.deepEqual(valuesOf(event), [{ type: 'Error', value: '' }])
+			assert.ok(event.exception?.values[0]?.stacktrace?.frames.length, 'кадры места, где кит поймал ошибку')
+		}
 	})
 
 	test('цепочка cause уходит кодами, без текста, цикл не мешает', async () => {
@@ -553,7 +641,8 @@ describe('sentry', () => {
 				stackParser: core.createStackParser(nodeStackLineParser()),
 				transport: () => ({
 					send: async (envelope) => {
-						for (const [header, body] of envelope[1]) if (header.type === 'event') events.push(body)
+						for (const [header, body] of envelope[1])
+							if (header.type === 'event') events.push({ ...body, envelope: envelope[0] })
 
 						return {}
 					},
@@ -568,7 +657,15 @@ describe('sentry', () => {
 			own.setExtra('token', '${PLANTED}')
 			own.setContext('upstream', { token: '${PLANTED}' })
 			own.setContext('runtime', { name: 'node', upstream: { token: '${PLANTED}' } })
+			own.setContext('app', { token: '${PLANTED}', app_memory: 1 })
 			own.addBreadcrumb({ message: '${PLANTED}' }, 100)
+			// Сервер продолжает трейс входящего запроса: baggage посетителя и имя транзакции
+			// с адресом SDK положил бы в заголовок конверта trace.
+			own.setPropagationContext({
+				traceId: '${TRACE_ID}',
+				sampleRand: 0.5,
+				dsc: { trace_id: '${TRACE_ID}', public_key: 'public', transaction: 'GET /reset/${PLANTED}', visitor: '${PLANTED}' },
+			})
 			core.getClient().addEventProcessor((event) => ({ ...event, request: { url: '/?token=${PLANTED}' } }))
 
 			const carriers = globalThis.__SENTRY__
@@ -618,7 +715,7 @@ describe('sentry', () => {
 
 		const { enabled, events, listeners } = JSON.parse(stdout) as {
 			enabled: boolean
-			events: Event[]
+			events: Array<Event & { envelope: { trace?: Record<string, unknown> } }>
 			listeners: number
 		}
 		const kit = events.find((event) => event.tags?.['mcp.tool'] === 'pay')
@@ -636,8 +733,21 @@ describe('sentry', () => {
 			assert.ok(own?.[field], `${field} у события самого сервера`)
 		}
 
-		assert.deepEqual(Object.keys(kit?.contexts ?? {}).sort(), ['runtime', 'trace'])
+		assert.deepEqual(Object.keys(kit?.contexts ?? {}).sort(), ['app', 'runtime', 'trace'])
 		assert.deepEqual(kit?.contexts?.runtime, { name: 'node' })
+		assert.deepEqual(kit?.contexts?.app, { app_memory: 1 })
+		// Связь с трейсом сервера остаётся, а DSC собран из опций клиента, без baggage посетителя.
+		assert.equal(kit?.contexts?.trace?.trace_id, TRACE_ID)
+
+		assert.deepEqual(kit?.envelope.trace, {
+			trace_id: TRACE_ID,
+			environment: 'production',
+			release: 'own@1.0.0',
+			public_key: 'public',
+			org_id: '0',
+		})
+
+		assert.equal(own?.envelope.trace?.visitor, PLANTED, 'событие самого сервера кит не трогает')
 		assert.ok(!JSON.stringify(kit).includes(PLANTED), JSON.stringify(kit))
 	})
 
@@ -661,6 +771,31 @@ describe('sentry', () => {
 		assert.equal(code, 1)
 		assert.match(stderr, /Error: crashed/)
 	})
+
+	// Без прототипа или с `toString`, который бросает: печать такой ошибки не должна помешать выйти.
+	for (const thrown of ['Object.create(null)', "{ toString() { throw new Error('no string') } }"]) {
+		test(`упавший процесс выходит с кодом 1, даже если брошенное не привести к строке: ${thrown}`, async () => {
+			const script = [
+				`const { initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
+				'const transport = () => ({ send: async () => ({}), flush: async () => true })',
+				"await initSentry({ name: 'crash-test', version: '0.0.1', transport })",
+				`setTimeout(() => { throw ${thrown} })`,
+				// Если обработчик падения не вышел, процесс жил бы дальше.
+				'setTimeout(() => process.exit(7), 5000)',
+			].join('\n')
+			const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+				env: { ...process.env, SENTRY_DSN: 'https://public@o0.ingest.sentry.io/1' },
+				stdio: ['ignore', 'ignore', 'pipe'],
+			})
+			let stderr = ''
+
+			child.stderr.on('data', (chunk) => (stderr += chunk))
+
+			const [code] = await once(child, 'exit')
+
+			assert.equal(code, 1, stderr)
+		})
+	}
 
 	test('зависший приёмник не держит процесс после отправки', async () => {
 		const ingest = createServer(() => {})

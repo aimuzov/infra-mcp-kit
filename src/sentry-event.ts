@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import type { Event, EventHint } from '@sentry/core'
@@ -26,20 +27,23 @@ const MAX_LINE = 1000
 // Имя функции в кадре: `Object.<anonymous>`, `#private`, `[Symbol.iterator]`, `get size`,
 // `run [as handler]`. `?` -- так SDK пишет безымянную.
 const FUNCTION_NAME = String.raw`(?:get |set )?[\p{L}\p{N}_$#.<>?\[\]-]{1,200}(?: \[as [\p{L}\p{N}_$#.<>?\[\]-]{1,200}\])?`
-// Путь к файлу кода. `~` -- наш же домашний каталог, `C:/` после `file:///C:/` у SDK.
-const PATH = String.raw`(?:\/|~[\\/]|file:\/\/|node:|[A-Za-z]:[\\/])[^()\n]{0,${MAX_LINE}}`
+// Путь к файлу кода. `~` -- наш же домашний каталог, `C:/` после `file:///C:/` у SDK. Символы --
+// те, из которых состоят пути к коду: буквы, цифры, пробел и `_.~@+%$:/\[]-`. Без `?`, `=`, `&`, `#`,
+// кавычек и скобок: из них состоят адреса с параметрами, заголовки и JSON в тексте ошибки.
+const PATH = String.raw`(?:\/|~[\\/]|file:\/\/|node:|[A-Za-z]:[\\/])[\p{L}\p{M}\p{N} _.~@+%$:/\\\[\]-]{0,${MAX_LINE}}`
 // Что V8 пишет вместо места, когда файла нет.
 const NO_FILE = String.raw`<anonymous>|native|index \d{1,10}`
 
 // Кадр V8: `    at [async |new ]имя (место)` или `    at [async ]место`. В месте нет скобок, поэтому
 // граница однозначна. `eval at ...`, `data:` и прочее не подходят и отбрасываются.
+const AT = '    at '
 const CALL = new RegExp(String.raw`^ {4}at (async |new )?(${FUNCTION_NAME}) \(([^()]+)\)$`, 'u')
 const BARE = /^ {4}at (async )?([^()\s][^()]*)$/
-const PLACE = new RegExp(String.raw`^(?:(${PATH}):(\d{1,10}):(\d{1,10})|${NO_FILE})$`)
+const PLACE = new RegExp(String.raw`^(?:(${PATH}):(\d{1,10}):(\d{1,10})|${NO_FILE})$`, 'u')
 
 // Те же части в кадре события после разбора SDK: функция без `async`, файл без `:строка:столбец`.
 const FUNCTION = new RegExp(String.raw`^(?:new )?${FUNCTION_NAME}$`, 'u')
-const FILE = new RegExp(String.raw`^(?:${PATH}|${NO_FILE})$`)
+const FILE = new RegExp(String.raw`^(?:${PATH}|${NO_FILE})$`, 'u')
 const MODULE = /^[\p{L}\p{N}_$@.:/~+-]{1,300}$/u
 
 const TAG = /^[\w.-]{1,32}$/
@@ -47,9 +51,26 @@ const TAG_VALUE_LENGTH = 200
 // Сегмент пути в теге `http.path`, который остаётся как есть: слово, а не токен или код.
 const SEGMENT = /^[A-Za-z._-]{1,32}$/
 
-const CONTEXTS = new Set(['trace', 'runtime', 'os', 'app', 'device', 'culture', 'cloud_resource'])
-// У `trace` старых SDK бывают `data` и `description` с адресом запроса: оставляем только связь.
-const TRACE = new Set(['trace_id', 'span_id', 'parent_span_id'])
+// Контексты и в них только поля, которые заполняет сам SDK: у `@sentry/node` сервера это ОС,
+// память и процессор, локаль и регион облака. Без имени устройства, `cloud.account.id`, `host.id`
+// и того, что сервис положил в контекст сам. У `trace` только связь, без `data` с адресом запроса.
+const CONTEXTS: Record<string, ReadonlySet<string>> = {
+	trace: new Set(['trace_id', 'span_id', 'parent_span_id']),
+	runtime: new Set(['name', 'version']),
+	os: new Set(['name', 'version', 'build', 'kernel_version']),
+	app: new Set(['app_start_time', 'app_memory', 'free_memory']),
+	device: new Set([
+		'arch',
+		'boot_time',
+		'memory_size',
+		'free_memory',
+		'processor_count',
+		'cpu_description',
+		'processor_frequency',
+	]),
+	culture: new Set(['locale', 'timezone']),
+	cloud_resource: new Set(['cloud.provider', 'cloud.platform', 'cloud.region', 'cloud.availability_zone']),
+}
 
 type Check = (value: unknown) => boolean
 
@@ -103,6 +124,9 @@ function pick(source: unknown, checks: Record<string, Check>): Fields {
 }
 
 const copies = new WeakMap<object, Error>()
+// Все строгие копии. Кадры события SDK разбирает из стека исходной ошибки, и только у копии в нём
+// нет строк текста. Ошибку, которую сервер отдал SDK сам, мимо `captureError`, кит шлёт без кадров.
+const made = new WeakSet<Error>()
 
 /**
  * Строгая копия ошибки для Sentry, одна на исходный объект. Одну ошибку ловят двое, например
@@ -131,6 +155,7 @@ function copyOf(error: unknown, seen: Set<object>): Error {
 		const copy = new Error(`Non-Error thrown: ${error === null ? 'null' : typeof error}`)
 
 		copy.stack = [String(copy), ...framesOf(copy)].join('\n')
+		made.add(copy)
 
 		return copy
 	}
@@ -149,7 +174,14 @@ function copyOf(error: unknown, seen: Set<object>): Error {
 	)
 
 	copy.name = typeof name === 'string' && NAME.test(name) ? name : 'Error'
-	copy.stack = [String(copy), ...framesOf(error)].join('\n')
+
+	// Без кадров, когда стека нет или ни одна строка не подошла, событие с пустым текстом SDK
+	// отбрасывает как бесполезное (`eventFiltersIntegration` у `@sentry/node` сервера). Тогда
+	// кадры свои, как у брошенного не `Error`: по ним видно хотя бы, где кит ошибку поймал.
+	const frames = framesOf(error)
+
+	copy.stack = [String(copy), ...(frames.length > 0 ? frames : framesOf(copy))].join('\n')
+	made.add(copy)
 
 	return copy
 }
@@ -179,23 +211,29 @@ function codeOf(error: Error): string {
 /**
  * Кадры стека, отрисованные заново из разобранных частей. Стек начинается
  * с заголовка, а в нём текст ошибки, в том числе строки вида `    at ...`.
- * Заголовок обычно совпадает с `String(error)` и отрезается точно. Если текст
- * поменяли после того, как стек уже собрали, границы не видно: тогда кадры --
- * сплошной блок подходящих строк в конце стека. Строка прежнего текста,
- * подогнанная ровно под кадр, тогда в него попадёт, но только именем функции
- * и путём из разрешённых символов.
+ * Заголовок обычно совпадает с `String(error)` и отрезается точно, а кадры V8
+ * идут за ним сплошным блоком. Если текст поменяли после того, как стек уже
+ * собрали, границы не видно: тогда кадры -- сплошной блок подходящих строк
+ * в конце стека. И в том и в другом случае строка прежнего текста, подогнанная
+ * ровно под кадр, станет кадром: например, когда текст обрезали до первой
+ * строки. Но только именем функции и путём из разрешённых символов, без `?`,
+ * `=` и `&`, поэтому адрес с параметрами или заголовок так не уйдут.
  */
 function framesOf(error: Error): string[] {
 	const stack = read(error, 'stack')
 
 	if (typeof stack !== 'string') return []
 
-	const head = headOf(error)
+	const head = headsOf(error).find((head) => stack === head || stack.startsWith(`${head}\n`))
 
-	if (head !== undefined && (stack === head || stack.startsWith(`${head}\n`))) {
+	if (head !== undefined) {
 		const frames: string[] = []
 
 		for (const line of stack.slice(head.length + 1).split('\n')) {
+			// Блок кончается на первой строке не с `    at `: так библиотеки дописывают
+			// к стеку стек вложенной ошибки вместе с её текстом.
+			if (!line.startsWith(AT)) break
+
 			const frame = frameOf(line)
 
 			if (frame) frames.push(frame)
@@ -214,13 +252,25 @@ function framesOf(error: Error): string[] {
 	return lines.slice(start, start + MAX_FRAMES).map((line) => frameOf(line)!)
 }
 
-/** `String(error)` без своего `toString` у ошибки: так заголовок стека собирает и V8. */
-function headOf(error: Error): string | undefined {
+/**
+ * Каким может быть заголовок стека: `String(error)` без своего `toString` у ошибки, так его
+ * собирает V8, и вариант Node с кодом у своих ошибок: `RangeError [ERR_OUT_OF_RANGE]: ...`.
+ */
+function headsOf(error: Error): string[] {
+	let head: string
+
 	try {
-		return Error.prototype.toString.call(error)
+		head = Error.prototype.toString.call(error)
 	} catch {
-		return undefined
+		return []
 	}
+
+	const name = read(error, 'name')
+	const code = read(error, 'code')
+
+	return typeof name === 'string' && name !== '' && typeof code === 'string' && head.startsWith(name)
+		? [head, `${name} [${code}]${head.slice(name.length)}`]
+		: [head]
 }
 
 function frameOf(line: string): string | undefined {
@@ -232,13 +282,13 @@ function frameOf(line: string): string | undefined {
 	if (call) {
 		const place = placeOf(call[3]!)
 
-		return place && `    at ${call[1] ?? ''}${call[2]} (${place})`
+		return place && `${AT}${call[1] ?? ''}${call[2]} (${place})`
 	}
 
 	const bare = BARE.exec(line)
 	const place = bare && placeOf(bare[2]!)
 
-	return place ? `    at ${bare![1] ?? ''}${place}` : undefined
+	return place ? `${AT}${bare![1] ?? ''}${place}` : undefined
 }
 
 function placeOf(text: string): string | undefined {
@@ -253,22 +303,58 @@ function placeOf(text: string): string | undefined {
 
 let homes: string[] | undefined
 
+// На macOS и Windows файловая система по умолчанию не различает регистр: `/users/alice/...` --
+// тот же домашний каталог.
+const FOLD_CASE = process.platform === 'darwin' || process.platform === 'win32'
+
 /** Домашний каталог в пути становится `~`: у stdio-сервера на машине человека в нём его имя. */
 function withoutHome(path: string): string {
 	homes ??= homePrefixes()
 
-	const home = homes.find((prefix) => path.startsWith(prefix))
+	const home = homes.find((prefix) =>
+		FOLD_CASE ? path.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase() : path.startsWith(prefix),
+	)
 
 	return home ? `~${path.slice(home.length - 1)}` : path
 }
 
+/**
+ * Домашний каталог во всех видах, в каких он бывает в стеке: с `/` и `\` на конце, `file://`
+ * и `C:/` у SDK. `$HOME` Node отдаёт как есть, бывает и со слэшем на конце, а в стек пишет
+ * настоящий путь, поэтому за симлинком ищем ещё и его.
+ */
 function homePrefixes(): string[] {
-	const home = homedir()
+	const prefixes = new Set<string>()
 
-	// Корень, домашний каталог системных пользователей, не в счёт: иначе `~` стал бы любой путь.
-	if (/^(?:[A-Za-z]:)?[\\/]?$/.test(home)) return []
+	for (const raw of [homedir(), realHome()]) {
+		const home = trimSeparators(raw ?? '')
 
-	return [`${home}/`, `${home}\\`, `${pathToFileURL(home).href}/`]
+		// Корень, домашний каталог системных пользователей, не в счёт: иначе `~` стал бы любой путь.
+		if (/^(?:[A-Za-z]:)?$/.test(home)) continue
+
+		const forward = home.replaceAll('\\', '/')
+
+		for (const prefix of [`${home}/`, `${home}\\`, `${forward}/`, `${pathToFileURL(home).href}/`])
+			prefixes.add(prefix)
+	}
+
+	return [...prefixes]
+}
+
+function realHome(): string | undefined {
+	try {
+		return realpathSync(homedir())
+	} catch {
+		return undefined
+	}
+}
+
+function trimSeparators(path: string): string {
+	let end = path.length
+
+	while (end > 0 && (path[end - 1] === '/' || path[end - 1] === '\\')) end--
+
+	return path.slice(0, end)
 }
 
 /**
@@ -284,19 +370,20 @@ export function strictEvent<T extends Event>(event: T, hint?: EventHint): T {
 	const tags = tagsOf(event.tags)
 	const contexts = contextsOf(event.contexts)
 	const values = event.exception?.values
+	const framed = made.has(hint?.originalException as Error)
 
 	if (tags) strict.tags = tags
 
 	if (contexts) strict.contexts = contexts
 
-	if (Array.isArray(values)) strict.exception = { values: values.map(exceptionOf) }
+	if (Array.isArray(values)) strict.exception = { values: values.map((value) => exceptionOf(value, framed)) }
 
 	return strict as T
 }
 
-function exceptionOf(exception: unknown): Fields {
+function exceptionOf(exception: unknown, framed: boolean): Fields {
 	const { type, value, mechanism, stacktrace }: Fields = isObject(exception) ? exception : {}
-	const frames = isObject(stacktrace) && Array.isArray(stacktrace.frames) ? stacktrace.frames : undefined
+	const frames = framed && isObject(stacktrace) && Array.isArray(stacktrace.frames) ? stacktrace.frames : undefined
 
 	return {
 		type: typeof type === 'string' && NAME.test(type) ? type : 'Error',
@@ -319,8 +406,9 @@ function frameFieldsOf(frame: unknown): Fields {
 }
 
 /**
- * Теги как есть, если ключ и значение похожи на тег. В `http.path` сегмент с цифрами или длинный
- * становится `*`: `/bot<token>/x` и `/login/<код>` не уносят секрет.
+ * Теги как есть, если ключ и значение похожи на тег. В `http.path` сегмент остаётся, только если
+ * он из латинских букв, `.`, `-` и `_` и не длиннее 32 символов, иначе становится `*`:
+ * `/bot<token>/x` и `/login/<код>` не уносят секрет.
  */
 function tagsOf(tags: unknown): Record<string, string> | undefined {
 	if (!isObject(tags)) return undefined
@@ -344,24 +432,26 @@ const pathTag = (path: string) =>
 		.map((segment) => (segment === '' || SEGMENT.test(segment) ? segment : '*'))
 		.join('/')
 
-/** Известные контексты и в них только простые значения: версия рантайма, ОС, регион облака. */
+/** Известные контексты, в них известные поля и только простые значения. */
 function contextsOf(contexts: unknown): Fields | undefined {
 	if (!isObject(contexts)) return undefined
 
 	const strict: Fields = {}
 
 	for (const [name, context] of Object.entries(contexts)) {
-		if (!CONTEXTS.has(name) || !isObject(context)) continue
+		const fields = Object.hasOwn(CONTEXTS, name) ? CONTEXTS[name] : undefined
 
-		strict[name] = Object.fromEntries(
-			Object.entries(context).filter(
-				([key, value]) =>
-					(name !== 'trace' || TRACE.has(key)) &&
-					((typeof value === 'string' && value.length <= TAG_VALUE_LENGTH) ||
-						Number.isFinite(value) ||
-						typeof value === 'boolean'),
-			),
+		if (!fields || !isObject(context)) continue
+
+		const kept = Object.entries(context).filter(
+			([key, value]) =>
+				fields.has(key) &&
+				((typeof value === 'string' && value.length <= TAG_VALUE_LENGTH) ||
+					Number.isFinite(value) ||
+					typeof value === 'boolean'),
 		)
+
+		if (kept.length > 0) strict[name] = Object.fromEntries(kept)
 	}
 
 	return strict

@@ -4,7 +4,7 @@ import { errorPage } from '#kit/http/json'
 import { kt, requestLocale, type Locale } from '#kit/i18n'
 import { log, type Logger } from '#kit/log'
 import type { AuthInfo } from '#kit/mcp'
-import { causesOf, messageOf } from '#kit/results'
+import { causesOf, logLoginFailure, messageOf } from '#kit/results'
 import { captureError } from '#kit/sentry'
 
 import {
@@ -287,7 +287,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 			return redirect(target.href)
 		} catch (error) {
 			if (!(error instanceof LoginError)) {
-				logger.error('login failed', { message: messageOf(error), causes: causesOf(error) })
+				logLoginFailure(logger, 'login failed', error)
 				captureError(error, { 'http.path': CALLBACK_PATH })
 
 				return fail(locale, kt(locale, 'oauth.failed'), kt(locale, 'server.later'))

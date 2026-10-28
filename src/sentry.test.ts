@@ -626,7 +626,7 @@ describe('sentry', () => {
 		assert.equal(event?.exception?.values[0]?.stacktrace?.frames.length, 50)
 	})
 
-	test('ошибка входа: лог хранит текст целиком, в Sentry его нет', async () => {
+	test('ошибка входа: в логе и в Sentry только тип и код', async () => {
 		const password = 'correct horse, battery'
 		const lines: string[] = []
 		const login = tokenFormLogin({
@@ -643,9 +643,12 @@ describe('sentry', () => {
 
 		await assert.rejects(oauthFlow({ base, login: submitForm({ login: 'bob', password }) }), /303/)
 
-		const logged = lines.find((line) => line.includes('login failed')) ?? ''
+		const logged = lines.filter((line) => line.includes('login failed'))
 
-		assert.ok(logged.includes(password), 'лог у того, кто держит сервер, и текст в нём целиком')
+		// Текст пишет апстрим, которому отдали пароль: в лог он идёт только при debug.
+		assert.equal(logged.length, 1)
+		assert.match(logged[0]!, /ERROR login failed \{"error":"Error"\}/)
+		assert.ok(!lines.join('').includes(password))
 		assert.ok((await events()).length === 1 && !sent[0]!.raw.includes(password))
 	})
 

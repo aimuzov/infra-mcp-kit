@@ -13,7 +13,7 @@ import {
 import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, hostCookie, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
-import { causesOf, messageOf } from '#kit/results'
+import { logLoginFailure } from '#kit/results'
 import { captureError } from '#kit/sentry'
 
 export type TelegramAccountOptions = TelegramConfig & {
@@ -133,7 +133,7 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 			} catch (error) {
 				// Claims собирает сервис, и его сбой -- такая же неудача входа, как у OAuth: человек
 				// видит страницу входа с просьбой зайти позже, а не общую 500.
-				context.logger.error('account login failed', { message: messageOf(error), causes: causesOf(error) })
+				logLoginFailure(context.logger, 'account login failed', error)
 				captureError(error, { 'http.path': url.pathname })
 
 				return fail('server.later')

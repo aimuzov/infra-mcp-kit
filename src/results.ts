@@ -1,5 +1,6 @@
 import { log as defaultLog, type Logger } from './log.ts'
 import type { CallToolResult } from './mcp.ts'
+import { strictError } from './sentry-event.ts'
 import { captureError } from './sentry.ts'
 
 export const text = (value: string): CallToolResult => ({ content: [{ type: 'text', text: value }] })
@@ -113,4 +114,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	const proto = Object.getPrototypeOf(value)
 
 	return proto === Object.prototype || proto === null
+}
+
+/**
+ * Сбой входа в лог: на обычном уровне только тип и код, как в Sentry, а текст с причинами
+ * только при `LOG_LEVEL=debug`. Текст пишет сервис, которому человек только что отдал
+ * токен или пароль, и лог хостящегося сервера иначе хранил бы их открыто.
+ */
+export function logLoginFailure(logger: Logger, message: string, error: unknown): void {
+	const { name, message: code } = strictError(error)
+
+	logger.error(message, { error: name, ...(code && { code }) })
+	logger.debug(message, { message: messageOf(error), causes: causesOf(error) })
 }

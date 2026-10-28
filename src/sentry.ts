@@ -19,6 +19,7 @@ type Reporter = {
 type ForeignScope = {
 	clone(): ForeignScope
 	setTags(tags: Tags): unknown
+	setFingerprint?(fingerprint: string[]): unknown
 	captureException(error: unknown): unknown
 	addEventProcessor(processor: (event: Event, hint: EventHint) => Event): unknown
 	getClient(): ForeignClient | undefined
@@ -44,6 +45,7 @@ export type SentryOptions = {
 const SEND_TIMEOUT = 2000
 
 let reporter: Reporter | undefined
+let captures = 0
 const tagged = new AsyncLocalStorage<Tags>()
 
 /**
@@ -149,6 +151,11 @@ function foreignReporter(): Reporter | undefined {
 				if (propagation) scope.setPropagationContext?.({ ...propagation, dsc: undefined })
 
 				scope.setTags(tags)
+				// `dedupeIntegration` сервера отбрасывает событие, если тип, код и кадры как у прошлого.
+				// У строгой копии текста нет, и подряд разные сбои из одного места слились бы в один.
+				// Свой отпечаток у каждого захвата это отключает, а `strictEvent` его потом убирает,
+				// и группирует Sentry как обычно. Одну и ту же ошибку второй раз SDK не шлёт и так.
+				scope.setFingerprint?.([`infra-mcp-kit:${++captures}`])
 				// `beforeSend` чужого клиента кит не ставит, поэтому строгим делает своё событие
 				// процессором на копии scope: остальные события сервера он не трогает.
 				scope.addEventProcessor(strictEvent)

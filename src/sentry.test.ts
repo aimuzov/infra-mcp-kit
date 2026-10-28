@@ -733,7 +733,8 @@ describe('sentry', () => {
 			core.initAndBind(ServerRuntimeClient, {
 				dsn: 'https://public@o0.ingest.sentry.io/1',
 				release: 'own@1.0.0',
-				integrations: [],
+				// Как у @sentry/node по умолчанию: подряд одинаковые события отбрасываются.
+				integrations: [core.dedupeIntegration()],
 				stackParser: core.createStackParser(nodeStackLineParser()),
 				transport: () => ({
 					send: async (envelope) => {
@@ -791,7 +792,9 @@ describe('sentry', () => {
 			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
 			const enabled = await kit.initSentry({ name: 'kit-test', version: '1.2.3', env: {} })
 
-			kit.withTags({ 'mcp.tool': 'pay' }, () => kit.captureError(new Error('via server, Bearer ${PLANTED}')))
+			// Разные сбои из одного места: у строгих копий тип, код и кадры совпадают.
+			for (const user of ['alice', 'bob'])
+				kit.withTags({ 'mcp.tool': 'pay' }, () => kit.captureError(new Error(\`upstream rejected \${user}, Bearer ${PLANTED}\`)))
 			// Своё событие сервер шлёт сам, и кит его не трогает.
 			own.captureException(new Error('server own'))
 			await kit.flushSentry()
@@ -814,13 +817,16 @@ describe('sentry', () => {
 			events: Array<Event & { envelope: { trace?: Record<string, unknown> } }>
 			listeners: number
 		}
-		const kit = events.find((event) => event.tags?.['mcp.tool'] === 'pay')
-		const own = events.find((event) => event !== kit)
+		const kits = events.filter((event) => event.tags?.['mcp.tool'] === 'pay')
+		const [kit] = kits
+		const own = events.find((event) => !kits.includes(event))
 
 		assert.equal(enabled, true)
 		assert.equal(listeners, 0, 'обработчики падения ставит сам сервер, кит свои не добавляет')
-		assert.equal(events.length, 2)
+		assert.equal(kits.length, 2, 'dedupe сервера не сливает разные сбои из одного места')
+		assert.equal(events.length, 3)
 		assert.equal(kit?.release, 'own@1.0.0')
+		assert.ok(kits.every((event) => event.fingerprint === undefined))
 		assert.deepEqual(valuesOf(kit), [{ type: 'Error', value: '' }])
 		assert.ok(kit?.exception?.values[0]?.stacktrace?.frames.length, 'кадры разобрал клиент сервера')
 
@@ -844,7 +850,7 @@ describe('sentry', () => {
 		})
 
 		assert.equal(own?.envelope.trace?.visitor, PLANTED, 'событие самого сервера кит не трогает')
-		assert.ok(!JSON.stringify(kit).includes(PLANTED), JSON.stringify(kit))
+		assert.ok(!JSON.stringify(kits).includes(PLANTED), JSON.stringify(kits))
 	})
 
 	// Сервер зовёт `Sentry.init` той же копией SDK уже после кита, например в `createServer`:

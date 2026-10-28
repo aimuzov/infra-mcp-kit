@@ -13,6 +13,8 @@ import {
 import { ownClaims } from '#kit/http/oauth/tokens'
 import { sessions as cookieSessions, hostCookie, readCookie, sameOrigin, type Sessions } from '#kit/http/session'
 import { DEFAULT_LOCALE, kt, localizePath, requestLocale, type KitKey } from '#kit/i18n'
+import { logLoginFailure } from '#kit/results'
+import { captureError } from '#kit/sentry'
 
 export type TelegramAccountOptions = TelegramConfig & {
 	/**
@@ -124,10 +126,20 @@ export function telegramAccount(options: TelegramAccountOptions): Route {
 
 			if (query.hash && !spendSignature(query.hash)) return fail('login.linkUsed')
 
-			const response = redirect(
-				localizePath(home, locale),
-				await session.cookie({ ...claimsOf(user), sub: user.id }),
-			)
+			let cookie: string
+
+			try {
+				cookie = await session.cookie({ ...claimsOf(user), sub: user.id })
+			} catch (error) {
+				// Claims собирает сервис, и его сбой -- такая же неудача входа, как у OAuth: человек
+				// видит страницу входа с просьбой зайти позже, а не общую 500.
+				logLoginFailure(context.logger, 'account login failed', error)
+				captureError(error, { 'http.path': url.pathname })
+
+				return fail('server.later')
+			}
+
+			const response = redirect(localizePath(home, locale), cookie)
 
 			response.headers.append('set-cookie', signinCookie('', 0))
 

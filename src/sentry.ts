@@ -1,8 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { hostname } from 'node:os'
-import type { BaseTransportOptions, Transport } from '@sentry/core'
+import { inspect } from 'node:util'
+import type { BaseTransportOptions, Envelope, ErrorEvent, Event, EventHint, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
+import { strictCopy, strictError, strictEvent } from './sentry-event.ts'
 
 type Tags = Record<string, string>
 type Core = typeof import('@sentry/core')
@@ -18,8 +19,12 @@ type Reporter = {
 type ForeignScope = {
 	clone(): ForeignScope
 	setTags(tags: Tags): unknown
+	setFingerprint?(fingerprint: string[]): unknown
 	captureException(error: unknown): unknown
+	addEventProcessor(processor: (event: Event, hint: EventHint) => Event): unknown
 	getClient(): ForeignClient | undefined
+	getPropagationContext?(): object
+	setPropagationContext?(context: object): unknown
 }
 type ForeignClient = {
 	flush(timeout: number): PromiseLike<unknown>
@@ -40,6 +45,7 @@ export type SentryOptions = {
 const SEND_TIMEOUT = 2000
 
 let reporter: Reporter | undefined
+let captures = 0
 const tagged = new AsyncLocalStorage<Tags>()
 
 /**
@@ -48,8 +54,8 @@ const tagged = new AsyncLocalStorage<Tags>()
  * OpenTelemetry и плагины сборщиков, 80 МБ против всего кита в 12. А его интеграции
  * пишут в событие адреса исходящих запросов и строки консоли, там бывают токены
  * и то, что люди доверили серверу.
- * Если сервер уже завёл Sentry сам, второй клиент не нужен: ошибки уходят через его.
- * Повторный вызов ничего не меняет. Возвращает, включён ли Sentry.
+ * Если сервер уже завёл Sentry сам, второй клиент не нужен: ошибки уходят через его. Заведёт
+ * позже -- кит всё равно шлёт своим. Повторный вызов ничего не меняет. Возвращает, включён ли Sentry.
  */
 export async function initSentry({ name, version, env = process.env, transport }: SentryOptions): Promise<boolean> {
 	if (reporter) return true
@@ -65,7 +71,7 @@ export async function initSentry({ name, version, env = process.env, transport }
 	const sentry = await import('@sentry/core')
 	const { nodeStackLineParser, ServerRuntimeClient } = await import('@sentry/core/server')
 
-	sentry.initAndBind(ServerRuntimeClient, {
+	const client = sentry.initAndBind(ServerRuntimeClient, {
 		dsn,
 		release: `${name}@${version}`,
 		environment: str(env, 'SENTRY_ENVIRONMENT', 'production'),
@@ -84,21 +90,30 @@ export async function initSentry({ name, version, env = process.env, transport }
 			queues: false,
 			stackFrameVariables: false,
 		},
-		integrations: [
-			sentry.eventFiltersIntegration(),
-			sentry.functionToStringIntegration(),
-			sentry.linkedErrorsIntegration(),
-		],
+		// `dataCollection` не касается текста ошибок, тегов и того, что сервер положил в scope:
+		// событие собирается заново только из разрешённых полей.
+		beforeSend: (event: ErrorEvent, hint: EventHint) => sealed(strictEvent(event, hint)),
+		beforeBreadcrumb: () => null,
+		// Без `eventFiltersIntegration`: текста в событии нет, и фильтровать по нему нечего,
+		// а копию без кадров и без кода он отбросил бы как бесполезную.
+		integrations: [sentry.functionToStringIntegration(), sentry.linkedErrorsIntegration()],
 		stackParser: sentry.createStackParser(nodeStackLineParser()),
-		transport: transport ?? fetchTransport(sentry),
+		transport: eventsOnly(transport ?? fetchTransport(sentry)),
 		platform: 'node',
 		runtime: { name: 'node', version: process.version },
-		serverName: hostname(),
 	})
 
 	reporter = {
-		capture: (error, tags) => sentry.captureException(error, { tags }),
-		flush: (timeout) => sentry.flush(timeout),
+		capture(error, tags) {
+			// Глобальный API шлёт через клиент, который сейчас в scope. Если сервер позже вызвал
+			// `Sentry.init` той же копией SDK, там уже его клиент, без `beforeSend` кита.
+			const scope = sentry.getCurrentScope().clone()
+
+			scope.setClient(client)
+			scope.setTags(tags)
+			scope.captureException(error)
+		},
+		flush: (timeout) => client.flush(timeout),
 	}
 
 	process.on('uncaughtException', fatal)
@@ -128,8 +143,22 @@ function foreignReporter(): Reporter | undefined {
 		return {
 			capture(error, tags) {
 				const scope = current()!.clone()
+				const propagation = scope.getPropagationContext?.()
+
+				// DSC входящего запроса, baggage посетителя и имя транзакции с адресом, SDK кладёт
+				// в заголовок конверта `trace` уже после процессоров. Связь с трейсом остаётся,
+				// а DSC SDK соберёт заново из своих опций: релиз, окружение, ключ DSN.
+				if (propagation) scope.setPropagationContext?.({ ...propagation, dsc: undefined })
 
 				scope.setTags(tags)
+				// `dedupeIntegration` сервера отбрасывает событие, если тип, код и кадры как у прошлого.
+				// У строгой копии текста нет, и подряд разные сбои из одного места слились бы в один.
+				// Свой отпечаток у каждого захвата это отключает, а `strictEvent` его потом убирает,
+				// и группирует Sentry как обычно. Одну и ту же ошибку второй раз SDK не шлёт и так.
+				scope.setFingerprint?.([`infra-mcp-kit:${++captures}`])
+				// `beforeSend` чужого клиента кит не ставит, поэтому строгим делает своё событие
+				// процессором на копии scope: остальные события сервера он не трогает.
+				scope.addEventProcessor(strictEvent)
 				scope.captureException(error)
 			},
 			flush: (timeout) => client.flush(timeout),
@@ -145,6 +174,37 @@ function foreignReporter(): Reporter | undefined {
  */
 const isClosed = (client: ForeignClient) =>
 	Symbol.for('SentryClosedClient') in client || client.getOptions?.().enabled === false
+
+/** События, которые кит собрал в `beforeSend`: SDK кладёт в конверт тот же объект. */
+const strict = new WeakSet<object>()
+
+function sealed<T extends object>(event: T) {
+	strict.add(event)
+
+	return event
+}
+
+/**
+ * Наружу только события, собранные китом в `beforeSend`. Остальное клиент шлёт мимо него,
+ * со scope той же копии `@sentry/core`: сессию с id и адресом посетителя, логи и метрики с его
+ * почтой, отзывы с `extra`, транзакции и вложения. И часть `event` не всегда прошла `beforeSend`:
+ * SDK зовёт его только для событий без `type`, а событие с `data.__sentry__` (так SDK сообщает
+ * о своей же поломке) не пускает ни в него, ни в процессоры.
+ */
+const eventsOnly =
+	(make: (options: BaseTransportOptions) => Transport) =>
+	(options: BaseTransportOptions): Transport => {
+		const transport = make(options)
+
+		return {
+			send([header, items]) {
+				const events = items.filter(([item, body]) => item.type === 'event' && strict.has(body as object))
+
+				return events.length ? transport.send([header, events] as Envelope) : Promise.resolve({})
+			},
+			flush: (timeout) => transport.flush(timeout),
+		}
+	}
 
 /** Сеть через `fetch` из Node: своего HTTP-клиента `@sentry/core` не везёт. */
 const fetchTransport = (sentry: Core) => (options: BaseTransportOptions) =>
@@ -175,50 +235,45 @@ async function fatal(error: unknown) {
 	if (dying) return
 
 	dying = true
-	// Копия: отправленную раньше ошибку Sentry помечает и второй раз не шлёт, а падение процесса --
-	// отдельное событие.
-	send(error instanceof Error ? copyOf(error) : error, { fatal: 'true' })
-	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
-	await flushSentry().catch(() => {})
-	process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)
-	process.exit(1)
+
+	try {
+		// Свежая копия мимо кэша: отправленную раньше ошибку Sentry помечает и второй раз не шлёт,
+		// а падение процесса -- отдельное событие.
+		send(strictCopy(error), { fatal: 'true' })
+		await flushSentry()
+	} catch {
+		// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
+	}
+
+	try {
+		process.stderr.write(`${describe(error)}\n`)
+	} finally {
+		process.exit(1)
+	}
 }
 
-const copyOf = (error: Error) =>
-	Object.assign(new Error(error.message, { cause: error.cause }), { name: error.name, stack: error.stack })
+/** Как печатает Node без слушателя: стек с `code` и цепочкой `cause`, её текста в Sentry нет. */
+function describe(error: unknown): string {
+	try {
+		return error !== null && typeof error === 'object' ? inspect(error) : String(error)
+	} catch {
+		// На ошибке с отозванным Proxy в `cause` бросает и `inspect`, тогда хватит стека.
+		return String((error as Error).stack)
+	}
+}
 
 /**
  * Отправить ошибку, которую кит поймал и превратил в ответ. Без Sentry ничего не делает.
+ * Уходит строгая копия, см. `strictError`: тип, код и кадры стека, без текста ошибки.
  * Одну ошибку могут поймать двое, например обработчик и HTTP-слой над ним: тот же объект
  * Sentry второй раз не шлёт, а разные случаи с одинаковым стеком уходят каждый.
  */
 export function captureError(error: unknown, tags?: Tags): void {
-	send(error, tags)
+	if (reporter) send(strictError(error), tags)
 }
 
-function send(error: unknown, tags?: Tags) {
-	reporter?.capture(safe(error), { ...tagged.getStore(), ...tags })
-}
-
-const replaced = new WeakMap<object, Error>()
-
-/**
- * Не `Error` уходит заменой: брошенный объект Sentry кладёт в событие целиком, а в нём
- * бывают аргументы инструмента. Строку оставляем, это тот же текст ошибки. Замена
- * для объекта одна и та же, чтобы повтор узнавался, как у `Error`.
- */
-function safe(error: unknown): Error {
-	if (error instanceof Error) return error
-
-	if (typeof error === 'string') return new Error(error)
-
-	const replacement = new Error(`Non-Error thrown: ${error === null ? 'null' : typeof error}`)
-
-	if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return replacement
-
-	if (!replaced.has(error)) replaced.set(error, replacement)
-
-	return replaced.get(error)!
+function send(copy: Error, tags?: Tags) {
+	reporter?.capture(copy, { ...tagged.getStore(), ...tags })
 }
 
 /**

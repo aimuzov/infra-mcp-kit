@@ -18,7 +18,7 @@ import {
 } from '#kit/i18n'
 import { log as defaultLog, type Logger } from '#kit/log'
 import type { AuthInfo, McpServer } from '#kit/mcp'
-import { messageOf } from '#kit/results'
+import { causesOf, messageOf } from '#kit/results'
 import { captureError } from '#kit/sentry'
 
 import type { HttpConfig } from './config.ts'
@@ -236,7 +236,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 		} catch (error) {
 			const { pathname } = new URL(request.url)
 
-			logger.error('request failed', { path: pathname, message: messageOf(error) })
+			logger.error('request failed', { path: pathname, message: messageOf(error), causes: causesOf(error) })
 			captureError(error, { 'http.path': pathname })
 
 			if (pathname === '/mcp') response = Response.json(INTERNAL_ERROR, { status: 500 })
@@ -269,7 +269,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 		void handle(request)
 			.then((response) => send(res, response))
 			.catch((error) => {
-				logger.error('response failed', { message: messageOf(error) })
+				logger.error('response failed', { message: messageOf(error), causes: causesOf(error) })
 				captureError(error)
 
 				if (!res.headersSent) res.writeHead(500)
@@ -332,7 +332,7 @@ async function respondMcp(
 					}),
 				)
 			} catch (error) {
-				logger.error('mcp request failed', { message: messageOf(error) })
+				logger.error('mcp request failed', { message: messageOf(error), causes: causesOf(error) })
 				captureError(error, { 'http.path': '/mcp' })
 				write(INTERNAL_ERROR)
 			} finally {

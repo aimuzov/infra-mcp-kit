@@ -951,6 +951,7 @@ describe('sentry', () => {
 	// например черновике immer после `produce`, бросают и `instanceof`, и `inspect`.
 	for (const [kind, thrown, printed, values] of [
 		['без прототипа', 'Object.create(null)', /\[Object: null prototype\] \{\}/, NON_ERROR],
+		['простой объект', "{ code: 'E_UPSTREAM', detail: 'quota' }", /detail: 'quota'/, NON_ERROR],
 		['с toString, который бросает', "{ toString() { throw new Error('no string') } }", /toString/, NON_ERROR],
 		['отозванный Proxy', REVOKED, /<Revoked Proxy>/, NON_ERROR],
 		[

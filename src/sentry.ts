@@ -255,15 +255,10 @@ async function fatal(error: unknown) {
 /** Как печатает Node без слушателя: стек с `code` и цепочкой `cause`, её текста в Sentry нет. */
 function describe(error: unknown): string {
 	try {
-		return error instanceof Error ? inspect(error) : String(error)
+		return error !== null && typeof error === 'object' ? inspect(error) : String(error)
 	} catch {
-		// Объект без прототипа или с `toString`, который бросает: печатаем, как Node, не вызывая его.
-		// А на ошибке с отозванным Proxy в `cause` бросает и `inspect`, тогда хватит стека.
-		try {
-			return inspect(error)
-		} catch {
-			return String((error as Error).stack)
-		}
+		// На ошибке с отозванным Proxy в `cause` бросает и `inspect`, тогда хватит стека.
+		return String((error as Error).stack)
 	}
 }
 

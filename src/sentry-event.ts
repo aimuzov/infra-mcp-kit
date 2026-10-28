@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import type { Event, EventHint } from '@sentry/core'
 
@@ -336,12 +336,15 @@ function withoutHome(path: string): string {
 /**
  * Домашний каталог во всех видах, в каких он бывает в стеке: с `/` и `\` на конце, `file://`
  * и `C:/` у SDK. `$HOME` Node отдаёт как есть, бывает и со слэшем на конце, а в стек пишет
- * настоящий путь, поэтому за симлинком ищем ещё и его.
+ * настоящий путь, поэтому за симлинком ищем ещё и его. А клиент MCP может запустить сервер
+ * из настоящего домашнего каталога с другим `$HOME` (песочница, отдельный профиль, `sudo`),
+ * поэтому берём ещё каталог пользователя из системы.
  */
 function homePrefixes(): string[] {
 	const prefixes = new Set<string>()
+	const homes = [homedir(), accountHome()]
 
-	for (const raw of [homedir(), realHome()]) {
+	for (const raw of [...homes, ...homes.map(realPath)]) {
 		const home = trimSeparators(raw ?? '')
 
 		// Корень, домашний каталог системных пользователей, не в счёт: иначе `~` стал бы любой путь.
@@ -356,9 +359,18 @@ function homePrefixes(): string[] {
 	return [...prefixes]
 }
 
-function realHome(): string | undefined {
+/** Каталог из записи пользователя в системе, мимо `$HOME`. Без такой записи `userInfo()` бросает. */
+function accountHome(): string | undefined {
 	try {
-		return realpathSync(homedir())
+		return userInfo().homedir
+	} catch {
+		return undefined
+	}
+}
+
+function realPath(path: string | undefined): string | undefined {
+	try {
+		return path ? realpathSync(path) : undefined
 	} catch {
 		return undefined
 	}

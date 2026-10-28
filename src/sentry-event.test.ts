@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { pathToFileURL } from 'node:url'
@@ -256,6 +256,13 @@ test('домашний каталог со слэшем на конце, за с
 		// Корень домашним каталогом не считается.
 		assert.deepEqual(await framesWithHome('/', ['    at run (/srv/index.js:1:1)']), [
 			'    at run (/srv/index.js:1:1)',
+		])
+
+		// Сервер установлен в настоящем домашнем каталоге, а запущен с другим `$HOME`.
+		const account = userInfo().homedir
+
+		assert.deepEqual(await framesWithHome(real, [`    at run (${account}/project/index.js:1:1)`]), [
+			'    at run (~/project/index.js:1:1)',
 		])
 
 		// Каталога нет, настоящий путь не узнать: хватает `$HOME` как есть.

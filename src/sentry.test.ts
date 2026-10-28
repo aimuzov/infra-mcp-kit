@@ -425,20 +425,66 @@ describe('sentry', () => {
 		assert.ok(!sent[0]!.raw.includes(PLANTED), sent[0]!.raw)
 	})
 
-	test('ошибка, отправленная через SDK мимо captureError, уходит без кадров', async () => {
+	test('ошибка, отправленная через SDK мимо captureError, уходит без кадров и с кодом из неё самой', async () => {
 		// Сервис зовёт ту же копию `@sentry/core`, что у кита: событие идёт через клиент кита,
-		// а кадры SDK разбирает из исходного стека вместе со строками текста.
+		// а кадры и текст исключения SDK берёт из исходной ошибки, вместе со строками текста.
+		const KEY = 'AKIAIOSFODNN7EXAMPLE'
+
 		core.captureException(
 			new TypeError(`upstream 401\n    at leak (/srv/${PLANTED}.js:1:1)\n    at /srv/${JWT}:2:2`),
 		)
 
-		const [event] = await events()
+		core.captureException(Object.assign(new Error(`connect ${PLANTED}`), { code: 'ECONNREFUSED' }))
+		core.captureException(Object.assign(new Error(`upstream ${PLANTED}`), { status: 503 }))
+		// Текст, похожий на код, -- ключ доступа AWS.
+		core.captureException(new Error(KEY))
 
-		assert.deepEqual(event?.exception?.values, [
+		const all = await events()
+
+		assert.deepEqual(all[0]?.exception?.values, [
 			{ type: 'TypeError', value: '', mechanism: { type: 'generic', handled: true } },
 		])
 
-		assert.ok(!sent[0]!.raw.includes(PLANTED) && !sent[0]!.raw.includes(JWT), sent[0]!.raw)
+		assert.deepEqual(
+			all.slice(1).map((event) => valuesOf(event)),
+			[
+				[{ type: 'Error', value: 'ECONNREFUSED' }],
+				[{ type: 'Error', value: '503' }],
+				[{ type: 'Error', value: '' }],
+			],
+		)
+
+		for (const { raw } of sent) for (const secret of [PLANTED, JWT, KEY]) assert.ok(!raw.includes(secret), raw)
+	})
+
+	test('текст причин из cause есть в логе, в Sentry только их коды', async () => {
+		const lines: string[] = []
+		const mcp = new McpServer(
+			{ name: 'kit', version: '3.0.0' },
+			{ logger: createLogger({ write: (line) => lines.push(line) }) },
+		)
+
+		mcp.registerTool('get_card', { description: 'Throws like fetch' }, async () => {
+			throw new TypeError('fetch failed', {
+				cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.7:5432'), { code: 'ECONNREFUSED' }),
+			})
+		})
+
+		await call(mcp, 'get_card')
+
+		const [event] = await events()
+
+		assert.match(
+			lines[0] ?? '',
+			/tool failed \{"tool":"get_card","message":"fetch failed","causes":\["connect ECONNREFUSED 10\.0\.0\.7:5432"\]\}/,
+		)
+
+		assert.deepEqual(valuesOf(event), [
+			{ type: 'Error', value: 'ECONNREFUSED' },
+			{ type: 'TypeError', value: '' },
+		])
+
+		assert.ok(!sent[0]!.raw.includes('10.0.0.7'))
 	})
 
 	test('ошибка без кадров и без кода не теряется', async () => {
@@ -751,6 +797,76 @@ describe('sentry', () => {
 		assert.ok(!JSON.stringify(kit).includes(PLANTED), JSON.stringify(kit))
 	})
 
+	// Сервер зовёт `Sentry.init` той же копией SDK уже после кита, например в `createServer`:
+	// его клиент встаёт в scope на место клиента кита.
+	test('если сервер завёл Sentry после кита, кит шлёт своим клиентом', async () => {
+		const script = `
+			const core = await import('@sentry/core')
+			const { nodeStackLineParser, ServerRuntimeClient } = await import('@sentry/core/server')
+			const kit = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})
+			const capture = (into) => () => ({
+				send: async (envelope) => {
+					for (const [header, body] of envelope[1]) if (header.type === 'event') into.push(body)
+
+					return {}
+				},
+				flush: async () => true,
+			})
+			const own = []
+			const server = []
+
+			await kit.initSentry({
+				name: 'kit-test',
+				version: '1.2.3',
+				env: { SENTRY_DSN: 'https://public@o0.ingest.sentry.io/1' },
+				transport: capture(own),
+			})
+
+			core.initAndBind(ServerRuntimeClient, {
+				dsn: 'https://public@o0.ingest.sentry.io/2',
+				release: 'server@1.0.0',
+				serverName: 'my-laptop',
+				integrations: [],
+				stackParser: core.createStackParser(nodeStackLineParser()),
+				transport: capture(server),
+			})
+			core.getCurrentScope().setUser({ id: '${PLANTED}' })
+			core.getCurrentScope().setExtra('token', '${PLANTED}')
+			core.addBreadcrumb({ message: '${PLANTED}' })
+
+			kit.captureError(new Error('upstream ${PLANTED}'), { 'mcp.tool': 'pay' })
+			await kit.flushSentry()
+			await core.flush(2000)
+			console.log(JSON.stringify({ own, server }))
+		`
+		const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+			env: { ...process.env, SENTRY_DSN: '' },
+			// SDK ругается в stderr на второй `Sentry.init`.
+			stdio: ['ignore', 'pipe', 'pipe'],
+		})
+		let stdout = ''
+		let stderr = ''
+
+		child.stdout.on('data', (chunk) => (stdout += chunk))
+		child.stderr.on('data', (chunk) => (stderr += chunk))
+
+		const [code] = await once(child, 'exit')
+
+		assert.equal(code, 0, stderr)
+
+		const { own, server } = JSON.parse(stdout) as { own: Event[]; server: Event[] }
+
+		assert.equal(server.length, 0, 'через клиент сервера событие кита не идёт')
+		assert.equal(own.length, 1)
+		assert.equal(own[0]?.release, 'kit-test@1.2.3')
+		assert.deepEqual(own[0]?.tags, { 'mcp.tool': 'pay' })
+
+		for (const field of ['user', 'extra', 'breadcrumbs', 'server_name'])
+			assert.equal(own[0]?.[field], undefined, field)
+
+		assert.ok(!stdout.includes(PLANTED) && !stdout.includes('my-laptop'), stdout)
+	})
+
 	test('сломанная отправка не мешает упавшему процессу выйти с кодом 1', async () => {
 		const script = [
 			`const { initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
@@ -772,12 +888,34 @@ describe('sentry', () => {
 		assert.match(stderr, /Error: crashed/)
 	})
 
-	// Без прототипа или с `toString`, который бросает: печать такой ошибки не должна помешать выйти.
-	for (const thrown of ['Object.create(null)', "{ toString() { throw new Error('no string') } }"]) {
-		test(`упавший процесс выходит с кодом 1, даже если брошенное не привести к строке: ${thrown}`, async () => {
+	const REVOKED = '(() => { const { proxy, revoke } = Proxy.revocable({}, {}); revoke(); return proxy })()'
+	const NON_ERROR = ['Non-Error thrown: object']
+
+	// Ни отправка, ни печать такого брошенного не должны помешать выйти. На отозванном Proxy,
+	// например черновике immer после `produce`, бросают и `instanceof`, и `inspect`.
+	for (const [kind, thrown, printed, values] of [
+		['без прототипа', 'Object.create(null)', /\[Object: null prototype\] \{\}/, NON_ERROR],
+		['с toString, который бросает', "{ toString() { throw new Error('no string') } }", /toString/, NON_ERROR],
+		['отозванный Proxy', REVOKED, /<Revoked Proxy>/, NON_ERROR],
+		[
+			'ошибка с отозванным Proxy в cause',
+			`new Error('crashed', { cause: ${REVOKED} })`,
+			/^Error: crashed\n {4}at /,
+			[''],
+		],
+		// Текст причины печатается, как у Node без слушателя: в Sentry от неё только код.
+		[
+			'ошибка с причиной',
+			"new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED 10.0.0.7:5432'), { code: 'ECONNREFUSED' }) })",
+			/^TypeError: fetch failed\n[\s\S]*\[cause\]: Error: connect ECONNREFUSED 10\.0\.0\.7:5432\n[\s\S]*code: 'ECONNREFUSED'/,
+			['ECONNREFUSED', ''],
+		],
+	] as const) {
+		test(`упавший процесс выходит с кодом 1, что бы ни бросили: ${kind}`, async () => {
 			const script = [
 				`const { initSentry } = await import(${JSON.stringify(new URL('./sentry.ts', import.meta.url).href)})`,
-				'const transport = () => ({ send: async () => ({}), flush: async () => true })',
+				'const send = async (envelope) => (console.log(JSON.stringify(envelope[1][0][1].exception.values.map((v) => v.value))), {})',
+				'const transport = () => ({ send, flush: async () => true })',
 				"await initSentry({ name: 'crash-test', version: '0.0.1', transport })",
 				`setTimeout(() => { throw ${thrown} })`,
 				// Если обработчик падения не вышел, процесс жил бы дальше.
@@ -785,15 +923,19 @@ describe('sentry', () => {
 			].join('\n')
 			const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
 				env: { ...process.env, SENTRY_DSN: 'https://public@o0.ingest.sentry.io/1' },
-				stdio: ['ignore', 'ignore', 'pipe'],
+				stdio: ['ignore', 'pipe', 'pipe'],
 			})
+			let stdout = ''
 			let stderr = ''
 
+			child.stdout.on('data', (chunk) => (stdout += chunk))
 			child.stderr.on('data', (chunk) => (stderr += chunk))
 
 			const [code] = await once(child, 'exit')
 
 			assert.equal(code, 1, stderr)
+			assert.match(stderr, printed)
+			assert.deepEqual(JSON.parse(stdout), values, 'падение ушло событием')
 		})
 	}
 

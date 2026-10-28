@@ -1,6 +1,6 @@
 import { parseLogLevel } from './log.ts'
 import type { McpServer } from './mcp.ts'
-import { messageOf } from './results.ts'
+import { causesOf, messageOf } from './results.ts'
 import { captureError, flushSentry, initSentry } from './sentry.ts'
 import { serveStdio } from './stdio.ts'
 
@@ -69,7 +69,8 @@ export async function runCli({
 
 		await run(args)
 	} catch (error) {
-		console.error(`${name}: ${messageOf(error)}`)
+		// С текстом причин из `cause`: в Sentry от них только коды.
+		console.error(`${name}: ${[messageOf(error), ...(causesOf(error) ?? [])].join(': ')}`)
 		captureError(error)
 		await flushSentry()
 

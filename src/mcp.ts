@@ -4,7 +4,7 @@ import { JsonSchemaAdapter } from 'tmcp/adapter'
 import { z, type ZodType } from 'zod'
 
 import { log as defaultLog, type Logger } from './log.ts'
-import { failure, messageOf } from './results.ts'
+import { causesOf, failure, messageOf } from './results.ts'
 import { captureError, withTags } from './sentry.ts'
 
 export type TextContent = { type: 'text'; text: string; _meta?: Record<string, unknown> }
@@ -255,7 +255,12 @@ export class McpServer {
 						try {
 							return (await (schema ? handler(input, extra) : handler(extra))) as CallToolResult
 						} catch (error) {
-							this.#logger.error('tool failed', { tool: name, message: messageOf(error) })
+							this.#logger.error('tool failed', {
+								tool: name,
+								message: messageOf(error),
+								causes: causesOf(error),
+							})
+
 							captureError(error)
 
 							return failure(error)
@@ -416,7 +421,7 @@ export class McpServer {
 					if (response && !controller.signal.aborted) await transport.send(response)
 				})
 				.catch((error) => {
-					this.#logger.error('mcp message failed', { message: messageOf(error) })
+					this.#logger.error('mcp message failed', { message: messageOf(error), causes: causesOf(error) })
 					captureError(error)
 				})
 				.finally(() => {
@@ -493,7 +498,7 @@ function reported(logger: Logger, kind: 'prompt' | 'resource', name: string, run
 		try {
 			return await run()
 		} catch (error) {
-			logger.error(`${kind} failed`, { [kind]: name, message: messageOf(error) })
+			logger.error(`${kind} failed`, { [kind]: name, message: messageOf(error), causes: causesOf(error) })
 			captureError(error)
 
 			throw error

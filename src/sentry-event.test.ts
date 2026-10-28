@@ -498,31 +498,81 @@ test('strictEvent оставляет только разрешённые пол�
 	assert.deepEqual(strictEvent({ level: 'secret', exception: {} } as unknown as Event), {})
 })
 
-test('кадры события только у строгой копии кита', () => {
-	// Сервер отдал SDK ошибку сам, мимо `captureError`: кадры SDK разобрал из её исходного стека,
-	// вместе со строками текста. Тип и разрешённый код остаются.
-	const event = {
-		exception: {
-			values: [
-				{
+test('ошибка мимо captureError: без кадров, код из самой ошибки', () => {
+	// Сервер отдал SDK ошибку сам, мимо `captureError`: кадры SDK разобрал из её исходного стека
+	// вместе со строками текста, а текст исключения взял из текста ошибки.
+	const KEY = 'AKIAIOSFODNN7EXAMPLE'
+	const event = (...values: string[]) =>
+		({
+			exception: {
+				values: values.map((value) => ({
 					type: 'TypeError',
-					value: 'ECONNREFUSED',
+					value,
 					stacktrace: { frames: [{ filename: '/srv/leak.js', function: 'retry', lineno: 1 }] },
-				},
-			],
-		},
-	} as Event
+				})),
+			},
+		}) as Event
+	const valuesOf = (strict: Event) =>
+		strict.exception?.values?.map(({ value, stacktrace }) => ({ value, stacktrace }))
 
-	for (const hint of [undefined, {}, { originalException: new Error('x') }, { originalException: 'x' }])
-		assert.deepEqual(strictEvent(event, hint), {
-			exception: { values: [{ type: 'TypeError', value: 'ECONNREFUSED' }] },
-		})
+	for (const [hint, value] of [
+		[undefined, ''],
+		[{}, ''],
+		// Текст, похожий на код, -- ключ доступа AWS.
+		[{ originalException: new Error(KEY) }, ''],
+		[{ originalException: Object.assign(new Error(KEY), { code: 'ECONNREFUSED' }) }, 'ECONNREFUSED'],
+		[{ originalException: Object.assign(new Error(KEY), { status: 503 }) }, '503'],
+		[{ originalException: KEY }, 'Non-Error thrown: string'],
+	] as const)
+		assert.deepEqual(strictEvent(event(KEY), hint), { exception: { values: [{ type: 'TypeError', value }] } })
 
+	// Причины из `cause` SDK кладёт перед самой ошибкой, и их текст пустой.
+	assert.deepEqual(
+		valuesOf(
+			strictEvent(event('ECONNREFUSED', KEY), {
+				originalException: Object.assign(new Error(KEY), { code: 'EPIPE' }),
+			}),
+		),
+		[
+			{ value: '', stacktrace: undefined },
+			{ value: 'EPIPE', stacktrace: undefined },
+		],
+	)
+
+	// У строгой копии кита текст и кадры из события.
 	for (const original of [strictError(new Error('x')), strictCopy('x')])
-		assert.equal(
-			strictEvent(event, { originalException: original }).exception?.values?.[0]?.stacktrace?.frames?.length,
-			1,
-		)
+		assert.deepEqual(valuesOf(strictEvent(event('ECONNREFUSED', ''), { originalException: original })), [
+			{
+				value: 'ECONNREFUSED',
+				stacktrace: { frames: [{ filename: '/srv/leak.js', function: 'retry', lineno: 1 }] },
+			},
+			{ value: '', stacktrace: { frames: [{ filename: '/srv/leak.js', function: 'retry', lineno: 1 }] } },
+		])
+})
+
+test('отозванный Proxy, брошенный сам или в cause, не ломает копию', () => {
+	// `instanceof` на нём бросает. Такое бывает с черновиком immer после `produce`.
+	const revoked = () => {
+		const { proxy, revoke } = Proxy.revocable({}, {})
+
+		revoke()
+
+		return proxy
+	}
+
+	assert.equal(strictError(revoked()).message, 'Non-Error thrown: object')
+
+	const copy = strictError(Object.assign(new Error('x', { cause: revoked() }), { code: 'ECONNRESET' }))
+
+	assert.equal(copy.message, 'ECONNRESET')
+	assert.equal(copy.cause, undefined)
+
+	assert.deepEqual(
+		strictEvent({ exception: { values: [{ type: 'Error', value: 'x' }] } } as Event, {
+			originalException: revoked(),
+		}),
+		{ exception: { values: [{ type: 'Error', value: 'Non-Error thrown: object' }] } },
+	)
 })
 
 // Пороги с запасом в десятки раз: квадратичный разбор на таком входе шёл бы минуты.

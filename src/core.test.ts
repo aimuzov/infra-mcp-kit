@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { runCli } from './cli.ts'
 import { bool, dataDir, int, list, required, str } from './env.ts'
 import { createLogger, parseLogLevel } from './log.ts'
-import { failure, json, text, tool } from './results.ts'
+import { causesOf, failure, json, text, tool } from './results.ts'
 import { readVersion } from './version.ts'
 
 test('версия читается из ближайшего package.json', () => {
@@ -51,6 +51,53 @@ test('tool раскладывает результат обработчика п
 	)()
 
 	assert.match(lines[0] ?? '', /tool failed \{"tool":"search","message":"named"\}/)
+
+	await tool(
+		() => {
+			throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 10.0.0.7:5432') })
+		},
+		{ name: 'search', logger },
+	)()
+
+	assert.match(
+		lines[1] ?? '',
+		/tool failed \{"tool":"search","message":"fetch failed","causes":\["connect ECONNREFUSED 10\.0\.0\.7:5432"\]\}/,
+	)
+})
+
+test('causesOf: тексты цепочки cause до пяти уровней, без повторов', () => {
+	const inner = new Error('inner')
+	const outer = new Error('outer', { cause: inner })
+
+	inner.cause = outer
+	assert.deepEqual(causesOf(outer), ['inner'], 'цикл оборван')
+	assert.deepEqual(causesOf(new Error('x', { cause: { token: 'x' } })), ['{"token":"x"}'])
+	assert.deepEqual(causesOf(new Error('x', { cause: 'text' })), ['text'])
+
+	let deep = new Error('0')
+
+	for (let i = 1; i < 10; i++) deep = new Error(String(i), { cause: deep })
+
+	assert.deepEqual(causesOf(deep), ['8', '7', '6', '5', '4'])
+
+	for (const error of [new Error('x'), 'text', null, { cause: new Error('x') }])
+		assert.equal(causesOf(error), undefined)
+
+	// Отозванный Proxy в цепочке и геттер, который бросает: остаётся то, что успели прочитать.
+	const { proxy, revoke } = Proxy.revocable({}, {})
+
+	revoke()
+	assert.deepEqual(causesOf(new Error('x', { cause: new Error('first', { cause: proxy }) })), ['first'])
+
+	const getter = new Error('x')
+
+	Object.defineProperty(getter, 'cause', {
+		get() {
+			throw new Error('getter')
+		},
+	})
+
+	assert.equal(causesOf(getter), undefined)
 })
 
 test('env-хелперы: пустое значит незаданное, мусор даёт ошибку с именем переменной', () => {
@@ -142,5 +189,13 @@ test('runCli: подкоманды, неизвестная команда и о�
 
 	await runCli({ ...base, argv: ['serve', '--http'] })
 	assert.equal(process.exitCode, 1)
+
+	// Текст причин печатается за текстом ошибки: в Sentry от них только коды.
+	const fetchFailed = () => {
+		throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 10.0.0.7:5432') })
+	}
+
+	await runCli({ ...base, argv: ['sync'], commands: { sync: fetchFailed } })
+	assert.equal(out.at(-1), 'x: fetch failed: connect ECONNREFUSED 10.0.0.7:5432')
 	process.exitCode = 0
 })

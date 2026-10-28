@@ -39,6 +39,34 @@ export function messageOf(error: unknown): string {
 	return String(error)
 }
 
+const MAX_CAUSES = 5
+
+/**
+ * Тексты цепочки `cause` для лога, до пяти уровней. В Sentry из неё уходят только коды, а куда
+ * не достучался `fetch failed`, написано в тексте его причины: `connect ECONNREFUSED 10.0.0.7:5432`.
+ */
+export function causesOf(error: unknown): string[] | undefined {
+	const causes: string[] = []
+	const seen = new Set<unknown>()
+
+	try {
+		for (let item = error; item instanceof Error && causes.length < MAX_CAUSES;) {
+			seen.add(item)
+
+			const cause: unknown = item.cause
+
+			if (cause === undefined || seen.has(cause)) break
+
+			causes.push(messageOf(cause))
+			item = cause
+		}
+	} catch {
+		// Отозванный Proxy или геттер, который бросает: хватит того, что успели прочитать.
+	}
+
+	return causes.length > 0 ? causes : undefined
+}
+
 /** Ошибка инструмента уходит модели ответом с `isError`, а не исключением: так она может её прочитать и поправиться. */
 export const failure = (error: unknown): CallToolResult => ({ ...text(messageOf(error)), isError: true })
 
@@ -66,7 +94,7 @@ export function tool<Args extends unknown[]>(
 
 			return json(value, jsonOptions)
 		} catch (error) {
-			logger.error('tool failed', { tool: name, message: messageOf(error) })
+			logger.error('tool failed', { tool: name, message: messageOf(error), causes: causesOf(error) })
 			logger.debug('tool failed', { tool: name, stack: error instanceof Error ? error.stack : undefined })
 			captureError(error, name ? { 'mcp.tool': name } : undefined)
 

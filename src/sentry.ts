@@ -52,8 +52,8 @@ const tagged = new AsyncLocalStorage<Tags>()
  * OpenTelemetry и плагины сборщиков, 80 МБ против всего кита в 12. А его интеграции
  * пишут в событие адреса исходящих запросов и строки консоли, там бывают токены
  * и то, что люди доверили серверу.
- * Если сервер уже завёл Sentry сам, второй клиент не нужен: ошибки уходят через его.
- * Повторный вызов ничего не меняет. Возвращает, включён ли Sentry.
+ * Если сервер уже завёл Sentry сам, второй клиент не нужен: ошибки уходят через его. Заведёт
+ * позже -- кит всё равно шлёт своим. Повторный вызов ничего не меняет. Возвращает, включён ли Sentry.
  */
 export async function initSentry({ name, version, env = process.env, transport }: SentryOptions): Promise<boolean> {
 	if (reporter) return true
@@ -69,7 +69,7 @@ export async function initSentry({ name, version, env = process.env, transport }
 	const sentry = await import('@sentry/core')
 	const { nodeStackLineParser, ServerRuntimeClient } = await import('@sentry/core/server')
 
-	sentry.initAndBind(ServerRuntimeClient, {
+	const client = sentry.initAndBind(ServerRuntimeClient, {
 		dsn,
 		release: `${name}@${version}`,
 		environment: str(env, 'SENTRY_ENVIRONMENT', 'production'),
@@ -102,8 +102,16 @@ export async function initSentry({ name, version, env = process.env, transport }
 	})
 
 	reporter = {
-		capture: (error, tags) => sentry.captureException(error, { tags }),
-		flush: (timeout) => sentry.flush(timeout),
+		capture(error, tags) {
+			// Глобальный API шлёт через клиент, который сейчас в scope. Если сервер позже вызвал
+			// `Sentry.init` той же копией SDK, там уже его клиент, без `beforeSend` кита.
+			const scope = sentry.getCurrentScope().clone()
+
+			scope.setClient(client)
+			scope.setTags(tags)
+			scope.captureException(error)
+		},
+		flush: (timeout) => client.flush(timeout),
 	}
 
 	process.on('uncaughtException', fatal)
@@ -189,11 +197,15 @@ async function fatal(error: unknown) {
 	if (dying) return
 
 	dying = true
-	// Свежая копия мимо кэша: отправленную раньше ошибку Sentry помечает и второй раз не шлёт,
-	// а падение процесса -- отдельное событие.
-	send(strictCopy(error), { fatal: 'true' })
-	// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
-	await flushSentry().catch(() => {})
+
+	try {
+		// Свежая копия мимо кэша: отправленную раньше ошибку Sentry помечает и второй раз не шлёт,
+		// а падение процесса -- отдельное событие.
+		send(strictCopy(error), { fatal: 'true' })
+		await flushSentry()
+	} catch {
+		// Сломанная отправка не должна помешать выйти с 1 и напечатать стек.
+	}
 
 	try {
 		process.stderr.write(`${describe(error)}\n`)
@@ -202,12 +214,18 @@ async function fatal(error: unknown) {
 	}
 }
 
+/** Как печатает Node без слушателя: стек с `code` и цепочкой `cause`, её текста в Sentry нет. */
 function describe(error: unknown): string {
 	try {
-		return error instanceof Error ? String(error.stack) : String(error)
+		return error instanceof Error ? inspect(error) : String(error)
 	} catch {
 		// Объект без прототипа или с `toString`, который бросает: печатаем, как Node, не вызывая его.
-		return inspect(error)
+		// А на ошибке с отозванным Proxy в `cause` бросает и `inspect`, тогда хватит стека.
+		try {
+			return inspect(error)
+		} catch {
+			return String((error as Error).stack)
+		}
 	}
 }
 

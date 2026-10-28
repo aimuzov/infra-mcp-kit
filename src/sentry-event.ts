@@ -125,7 +125,8 @@ function pick(source: unknown, checks: Record<string, Check>): Fields {
 
 const copies = new WeakMap<object, Error>()
 // Все строгие копии. Кадры события SDK разбирает из стека исходной ошибки, и только у копии в нём
-// нет строк текста. Ошибку, которую сервер отдал SDK сам, мимо `captureError`, кит шлёт без кадров.
+// нет строк текста. Ошибку, которую сервер отдал SDK сам, мимо `captureError`, кит шлёт без кадров
+// и с кодом из неё самой.
 const made = new WeakSet<Error>()
 
 /**
@@ -149,10 +150,10 @@ export function strictError(error: unknown): Error {
 export const strictCopy = (error: unknown): Error => copyOf(error, new Set())
 
 function copyOf(error: unknown, seen: Set<object>): Error {
-	if (!(error instanceof Error)) {
+	if (!isError(error)) {
 		// В брошенном объекте бывают аргументы инструмента, а в строке -- что угодно. Кадры свои:
 		// по ним видно, где кит его поймал.
-		const copy = new Error(`Non-Error thrown: ${error === null ? 'null' : typeof error}`)
+		const copy = new Error(strictMessage(error))
 
 		copy.stack = [String(copy), ...framesOf(copy)].join('\n')
 		made.add(copy)
@@ -168,9 +169,7 @@ function copyOf(error: unknown, seen: Set<object>): Error {
 	// покажет отдельным исключением.
 	const copy = new Error(
 		codeOf(error),
-		cause instanceof Error && !seen.has(cause) && seen.size <= MAX_CAUSES
-			? { cause: copyOf(cause, seen) }
-			: undefined,
+		isError(cause) && !seen.has(cause) && seen.size <= MAX_CAUSES ? { cause: copyOf(cause, seen) } : undefined,
 	)
 
 	copy.name = typeof name === 'string' && NAME.test(name) ? name : 'Error'
@@ -185,6 +184,22 @@ function copyOf(error: unknown, seen: Set<object>): Error {
 
 	return copy
 }
+
+/**
+ * `instanceof` спрашивает прототип, а у отозванного Proxy, например черновика immer после
+ * `produce`, этот вопрос бросает. Такое брошенное уходит как не `Error`.
+ */
+function isError(value: unknown): value is Error {
+	try {
+		return value instanceof Error
+	} catch {
+		return false
+	}
+}
+
+/** Текст строгой копии: код ошибки или замена брошенного не `Error`, без его содержимого. */
+const strictMessage = (error: unknown) =>
+	isError(error) ? codeOf(error) : `Non-Error thrown: ${error === null ? 'null' : typeof error}`
 
 /** Чужое свойство может оказаться геттером, который бросает. */
 function read(error: Error, key: string): unknown {
@@ -370,24 +385,35 @@ export function strictEvent<T extends Event>(event: T, hint?: EventHint): T {
 	const tags = tagsOf(event.tags)
 	const contexts = contextsOf(event.contexts)
 	const values = event.exception?.values
-	const framed = made.has(hint?.originalException as Error)
+	const original = hint?.originalException
+	const own = made.has(original as Error)
 
 	if (tags) strict.tags = tags
 
 	if (contexts) strict.contexts = contexts
 
-	if (Array.isArray(values)) strict.exception = { values: values.map((value) => exceptionOf(value, framed)) }
+	if (Array.isArray(values)) {
+		// Ошибку, которую сервер отдал SDK сам, мимо `captureError`, SDK описал по её тексту, а текст,
+		// похожий на код, бывает и ключом доступа. Код такой ошибки берём из неё самой, в списке она
+		// последняя. Причины из `cause` с исключениями не сопоставить, их текст пустой.
+		const last = values.length - 1
+		const code = (index: number) => (index === last && original !== undefined ? strictMessage(original) : '')
+
+		strict.exception = { values: values.map((value, index) => exceptionOf(value, own, code(index))) }
+	}
 
 	return strict as T
 }
 
-function exceptionOf(exception: unknown, framed: boolean): Fields {
+/** У строгой копии кита текст и кадры из события, у чужой ошибки текст `code` и без кадров. */
+function exceptionOf(exception: unknown, own: boolean, code: string): Fields {
 	const { type, value, mechanism, stacktrace }: Fields = isObject(exception) ? exception : {}
-	const frames = framed && isObject(stacktrace) && Array.isArray(stacktrace.frames) ? stacktrace.frames : undefined
+	const frames = own && isObject(stacktrace) && Array.isArray(stacktrace.frames) ? stacktrace.frames : undefined
+	const text = own ? value : code
 
 	return {
 		type: typeof type === 'string' && NAME.test(type) ? type : 'Error',
-		value: typeof value === 'string' && VALUE.test(value) ? value : '',
+		value: typeof text === 'string' && VALUE.test(text) ? text : '',
 		...(isObject(mechanism) && { mechanism: { type: 'generic', ...pick(mechanism, MECHANISM) } }),
 		...(frames && { stacktrace: { frames: frames.map(frameFieldsOf) } }),
 	}

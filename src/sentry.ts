@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { inspect } from 'node:util'
-import type { BaseTransportOptions, Event, EventHint, Transport } from '@sentry/core'
+import type { BaseTransportOptions, Envelope, Event, EventHint, Transport } from '@sentry/core'
 
 import { str, type Env } from './env.ts'
 import { strictCopy, strictError, strictEvent } from './sentry-event.ts'
@@ -96,7 +96,7 @@ export async function initSentry({ name, version, env = process.env, transport }
 		// а копию без кадров и без кода он отбросил бы как бесполезную.
 		integrations: [sentry.functionToStringIntegration(), sentry.linkedErrorsIntegration()],
 		stackParser: sentry.createStackParser(nodeStackLineParser()),
-		transport: transport ?? fetchTransport(sentry),
+		transport: eventsOnly(transport ?? fetchTransport(sentry)),
 		platform: 'node',
 		runtime: { name: 'node', version: process.version },
 	})
@@ -167,6 +167,26 @@ function foreignReporter(): Reporter | undefined {
  */
 const isClosed = (client: ForeignClient) =>
 	Symbol.for('SentryClosedClient') in client || client.getOptions?.().enabled === false
+
+/**
+ * Наружу только события ошибок: их кит собирает сам в `beforeSend`. Остальное клиент шлёт мимо
+ * него, со scope той же копии `@sentry/core`: сессию с id и адресом посетителя, логи и метрики
+ * с его почтой, отзывы с `extra`, транзакции и вложения.
+ */
+const eventsOnly =
+	(make: (options: BaseTransportOptions) => Transport) =>
+	(options: BaseTransportOptions): Transport => {
+		const transport = make(options)
+
+		return {
+			send([header, items]) {
+				const events = items.filter(([item]) => item.type === 'event')
+
+				return events.length ? transport.send([header, events] as Envelope) : Promise.resolve({})
+			},
+			flush: (timeout) => transport.flush(timeout),
+		}
+	}
 
 /** Сеть через `fetch` из Node: своего HTTP-клиента `@sentry/core` не везёт. */
 const fetchTransport = (sentry: Core) => (options: BaseTransportOptions) =>

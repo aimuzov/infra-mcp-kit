@@ -53,6 +53,8 @@ type Event = {
 // Конверт Sentry -- `[заголовки, [[заголовок, тело], ...]]`. Храним заголовки, типы частей
 // и весь конверт строкой: по ней видно, что секрет не ушёл ни в одно поле.
 const sent: Array<{ event: Event; header: Record<string, unknown>; items: string[]; raw: string }> = []
+// Конверты без события: сессии, логи, метрики, отзывы. Наружу не должен уйти ни один.
+const others: string[] = []
 
 const transport = () => ({
 	send: async (envelope: unknown) => {
@@ -60,6 +62,7 @@ const transport = () => ({
 		const event = items.find(([item]) => item.type === 'event')?.[1] as Event | undefined
 
 		if (event) sent.push({ event, header, items: items.map(([item]) => item.type), raw: JSON.stringify(envelope) })
+		else others.push(JSON.stringify(envelope))
 
 		return {}
 	},
@@ -164,6 +167,7 @@ async function routeFailure(path: string, error: Error) {
 describe('sentry', () => {
 	beforeEach(() => {
 		sent.length = 0
+		others.length = 0
 	})
 
 	test('без SENTRY_DSN не включается и ничего не шлёт', async () => {
@@ -244,6 +248,35 @@ describe('sentry', () => {
 		assert.deepEqual(Object.keys(header).sort(), ['event_id', 'sent_at'])
 		assert.deepEqual(items, ['event'], 'вложения scope не уходят')
 		assert.equal(raw.split(PLANTED).length, 2, 'секрет только в теге, который сервис поставил сам')
+	})
+
+	test('сессия со scope той же копии SDK не уходит: в ней id посетителя и его адрес', async () => {
+		// Так делает `processSessionIntegration` из `@sentry/node`, а сервер потом зовёт `setUser`.
+		core.startSession()
+		core.setUser({ id: PLANTED, email: 'person@example.com', ip_address: '203.0.113.7' })
+		captureError(new Error('boom'))
+		core.endSession()
+		core.setUser(null)
+
+		assert.equal((await events()).length, 1)
+		assert.deepEqual(others, [], 'через транспорт уходят только события ошибок')
+		assert.ok(!sent[0]!.raw.includes(PLANTED) && !sent[0]!.raw.includes('203.0.113.7'), sent[0]!.raw)
+	})
+
+	test('логи, метрики, отзывы и транзакции через клиент кита не уходят', async () => {
+		core.withScope((scope) => {
+			scope.setUser({ email: 'person@example.com' })
+			scope.setExtra('token', PLANTED)
+			core.logger.info(`log ${PLANTED}`)
+			core.metrics.count('kit.test', 1, { attributes: { token: PLANTED } })
+			core.captureFeedback({ message: `feedback ${PLANTED}`, email: 'person@example.com' })
+			core.captureEvent({ type: 'transaction', transaction: `/login?code=${PLANTED}` })
+		})
+
+		await events()
+
+		assert.deepEqual(others, [], 'через транспорт уходят только события ошибок')
+		assert.deepEqual(sent, [])
 	})
 
 	test('ошибка инструмента уходит клиенту ответом и в Sentry с тегом, но без аргументов и текста', async () => {

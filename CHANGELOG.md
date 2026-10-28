@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.4.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.4.0...v3.4.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* scrub secrets from Sentry events and logs ([47fca29](https://github.com/aimuzov/infra-mcp-kit/commit/47fca294f588e20e10e1bbf7717070115f3a1932))
+* **scrub:** walk a shared object once and keep Error, Date and URL ([87550ed](https://github.com/aimuzov/infra-mcp-kit/commit/87550edac094ea6f8c4b941c5bec93f07202438a))
+* **sentry:** bound the URL scheme in the userinfo rule ([a7a7ec9](https://github.com/aimuzov/infra-mcp-kit/commit/a7a7ec97237863ec2d89453c5d38049acbfa3db7))
+* **sentry:** close the gaps found in the strict schema review ([97cb4e7](https://github.com/aimuzov/infra-mcp-kit/commit/97cb4e755a31524ae6e97d256c85b71f27008f04))
+* **sentry:** close the scrub gaps found by the attack review ([e20efcf](https://github.com/aimuzov/infra-mcp-kit/commit/e20efcf1dfe103baaaf5d95e539bd755339396b7))
+* **sentry:** keep a foreign dedupeIntegration from merging the kit's events ([dd7ff0b](https://github.com/aimuzov/infra-mcp-kit/commit/dd7ff0b1d1fd490b8d4abdf68066ab4a863c729e))
+* **sentry:** keep sign-in failure text out of the log unless LOG_LEVEL is debug ([d38cda4](https://github.com/aimuzov/infra-mcp-kit/commit/d38cda4e0cf9db07914dbcb086c93e32bf38b2c9))
+* **sentry:** print a thrown object the way Node does and qualify what stays out ([612f1fa](https://github.com/aimuzov/infra-mcp-kit/commit/612f1fa64f2d2644940eb5008f1255b76f1c8c5d))
+* **sentry:** replace the account home from the system with ~ as well ([12c2ceb](https://github.com/aimuzov/infra-mcp-kit/commit/12c2cebdfb1bfb48d0bc6d82a3afb1b4afd094f9))
+* **sentry:** scrub quoted values and stack frames ([a98bd63](https://github.com/aimuzov/infra-mcp-kit/commit/a98bd63ea55a2b9e94da30f0692aba5dbfb8f6ef))
+* **sentry:** send only error event envelopes through the kit's client ([4c66da2](https://github.com/aimuzov/infra-mcp-kit/commit/4c66da297af97261ef1cd27f957808d1f8dc171f))
+* **sentry:** send only error type, code and strict frames ([5289104](https://github.com/aimuzov/infra-mcp-kit/commit/528910401fdd8d101fffca2dc13bbf9bc1b8c6ee))
+* **sentry:** send only error type, code and strict frames ([94b6f37](https://github.com/aimuzov/infra-mcp-kit/commit/94b6f376de7abca766876981e9ef7bec41816087))
+* **sentry:** send only events built by the kit's beforeSend ([9d87197](https://github.com/aimuzov/infra-mcp-kit/commit/9d871978e573a370729a5381b297db3cda5d04d4))
+* **sentry:** send through the kit's own client and keep cause text in the log ([e90d83c](https://github.com/aimuzov/infra-mcp-kit/commit/e90d83cf7016cf213e52628134125dd5c2974f4b))
+* **sentry:** stop deep and cyclic values from leaking through the scrub ([0057c62](https://github.com/aimuzov/infra-mcp-kit/commit/0057c62b1ac1a26a86b1530d9e955791b29b90c3))
+
 ## [3.4.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.3.0...v3.4.0) (2026-10-27)
 
 

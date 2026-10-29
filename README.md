@@ -32,10 +32,10 @@ Shared parts of the aimuzov MCP servers built from [infra-mcp-template](https://
 ## Install
 
 ```bash
-npm install -E github:aimuzov/infra-mcp-kit#v3.0.0
+npm install -E @aimuzov/infra-mcp-kit
 ```
 
-npm builds the package on install, `prepare` runs `tsc`. The `zod` 4 peer stays in the server, `@modelcontextprotocol/sdk` only in its devDependencies for `/testing`. Publishing to npm is ready but off until the repo variable `NPM_PUBLISH` is set.
+The `zod` 4 peer stays in the server, `@modelcontextprotocol/sdk` only in its devDependencies for `/testing`.
 
 ## Core
 

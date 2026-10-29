@@ -32,10 +32,10 @@
 ## Установка
 
 ```bash
-npm install -E github:aimuzov/infra-mcp-kit#v3.0.0
+npm install -E @aimuzov/infra-mcp-kit
 ```
 
-npm собирает пакет при установке, `prepare` запускает `tsc`. Peer-зависимость `zod` 4 остаётся в сервере, `@modelcontextprotocol/sdk` — только в его devDependencies для `/testing`. Публикация в npm готова, но выключена, пока в репо не задана переменная `NPM_PUBLISH`.
+Peer-зависимость `zod` 4 остаётся в сервере, `@modelcontextprotocol/sdk` — только в его devDependencies для `/testing`.
 
 ## Ядро
 

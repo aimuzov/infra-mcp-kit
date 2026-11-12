@@ -125,6 +125,7 @@ export const RESERVED_CLAIMS = new Set([
 	'nbf',
 	'jti',
 	'aud',
+	'scope',
 	'client_id',
 	'fam',
 	'auth_time',

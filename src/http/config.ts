@@ -9,7 +9,7 @@ export type HttpConfig = {
 	publicUrl: URL
 	/** Ключ, которым подписываются или шифруются токены. */
 	authSecret: string
-	/** Колбэки, которые разрешено регистрировать сверх колбэков Claude и loopback. */
+	/** Колбэки, которые разрешено регистрировать сверх колбэков Claude, ChatGPT и loopback. */
 	allowedRedirectUris: string[]
 }
 
@@ -72,7 +72,7 @@ export const isLoopback = (url: URL): boolean => LOOPBACK.has(url.hostname)
  * который шлёт код на свой хост, подсунет жертве ссылку на вход и получит её доступ:
  * PKCE не спасёт, challenge задаёт он сам.
  *
- * Пускаем колбэки Claude, дополнительные из конфига и loopback по http: Claude Code слушает
+ * Пускаем колбэки Claude и ChatGPT, дополнительные из конфига и loopback по http: Claude Code слушает
  * случайный локальный порт, а код на машине самого человека никто другой не перехватит.
  */
 export function isAllowedRedirectUri(uri: string, extra: string[] = []): boolean {
@@ -81,6 +81,17 @@ export function isAllowedRedirectUri(uri: string, extra: string[] = []): boolean
 	if (!URL.canParse(uri)) return false
 
 	const url = new URL(uri)
+
+	if (
+		url.origin === 'https://chatgpt.com' &&
+		!url.username &&
+		!url.password &&
+		!url.search &&
+		!url.hash &&
+		(url.pathname === '/connector_platform_oauth_redirect' ||
+			/^\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(url.pathname))
+	)
+		return true
 
 	return url.protocol === 'http:' && isLoopback(url)
 }

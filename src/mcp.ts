@@ -39,6 +39,7 @@ export type AuthInfo = {
 	token: string
 	clientId: string
 	scopes: string[]
+	resource?: URL
 	expiresAt?: number
 	extra?: Record<string, unknown>
 }

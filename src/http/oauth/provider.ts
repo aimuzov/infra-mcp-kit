@@ -7,6 +7,8 @@ import type { AuthInfo } from '#kit/mcp'
 import {
 	InvalidClientMetadataError,
 	InvalidGrantError,
+	InvalidScopeError,
+	InvalidTargetError,
 	InvalidTokenError,
 	type OAuthClient,
 	type OAuthTokens,
@@ -36,6 +38,7 @@ export type AuthorizationParams = {
 	codeChallenge: string
 	state?: string
 	scopes?: string[]
+	resource?: string
 }
 
 /** Ошибка входа, которую стоит показать человеку на той же странице. */
@@ -91,6 +94,8 @@ export type ProviderOptions = {
 	store: AuthStore
 	login: Login
 	allowedRedirectUris?: string[]
+	scopesSupported?: string[]
+	mcpUrl?: URL
 }
 
 export const CALLBACK_PATH = '/authorize/callback'
@@ -149,7 +154,9 @@ export class KitOAuthProvider {
 
 	/** Страница входа. Запрос подписывается и возвращается на колбэк, где выдаётся код. */
 	async authorize(client: OAuthClient, params: AuthorizationParams): Promise<string> {
+		const binding = this.binding(params.resource, params.scopes)
 		const request = await this.options.tokens.sign('authorize', {
+			...binding,
 			sub: client.client_id,
 			redirect_uri: params.redirectUri,
 			code_challenge: params.codeChallenge,
@@ -176,14 +183,23 @@ export class KitOAuthProvider {
 	}
 
 	/** Выдать код по завершённому входу. Отдаёт адрес, куда редиректить. */
-	async issueCode(clientId: string, redirectUri: string, codeChallenge: string, state: string, grant: Grant) {
+	async issueCode(
+		clientId: string,
+		redirectUri: string,
+		codeChallenge: string,
+		state: string,
+		grant: Grant,
+		authorization?: Record<string, unknown>,
+	) {
 		const reserved = Object.keys(grant.claims ?? {}).filter((k) => RESERVED_CLAIMS.has(k))
 
 		// Молча перетереть `subject` или `exp` хуже, чем упасть:
 		// в инструмент приехал бы не тот пользователь.
 		if (reserved.length) throw new Error(`Вход вернул claims, которые кит ставит сам: ${reserved.join(', ')}`)
 
+		const binding = this.grantBinding(authorization)
 		const sealed = await this.options.tokens.sign('grant', {
+			...binding,
 			...grant.claims,
 			sub: grant.subject,
 			auth_time: Math.floor(Date.now() / 1000),
@@ -211,7 +227,18 @@ export class KitOAuthProvider {
 		code: string,
 		_verifier?: string,
 		redirectUri?: string,
+		resource?: string,
+		scopes?: string[],
 	): Promise<OAuthTokens> {
+		const preview = this.options.store.peekCode(code)
+
+		if (!preview || preview.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
+
+		const signed = await this.options.tokens.verify('grant', preview.grant)
+
+		if (!signed) throw new InvalidGrantError('Invalid authorization code')
+
+		const binding = this.exchangeBinding(signed, resource, scopes)
 		const pending = this.options.store.takeCode(code)
 
 		if (!pending || pending.clientId !== client.client_id) throw new InvalidGrantError('Invalid authorization code')
@@ -225,7 +252,7 @@ export class KitOAuthProvider {
 
 		const authTime = typeof grant.auth_time === 'number' ? grant.auth_time : Math.floor(Date.now() / 1000)
 
-		return this.issue(client.client_id, grant.sub, ownClaims(grant), randomUUID(), authTime)
+		return this.issue(client.client_id, grant.sub, ownClaims(grant), randomUUID(), authTime, binding)
 	}
 
 	/**
@@ -233,13 +260,20 @@ export class KitOAuthProvider {
 	 * Повтор потраченного значит, что токен утёк: отзываем всю цепочку, и войти
 	 * придётся заново и вору, и хозяину (RFC 9700, 4.14.2).
 	 */
-	async exchangeRefreshToken(client: OAuthClient, refreshToken: string): Promise<OAuthTokens> {
+	async exchangeRefreshToken(
+		client: OAuthClient,
+		refreshToken: string,
+		resource?: string,
+		scopes?: string[],
+	): Promise<OAuthTokens> {
 		const { tokens, store } = this.options
 		const claims = await tokens.verify('refresh', refreshToken)
 
 		if (!claims || claims.client_id !== client.client_id) {
 			throw new InvalidGrantError('Invalid refresh token')
 		}
+
+		const binding = this.exchangeBinding(claims, resource, scopes)
 
 		this.assertNotRevoked(claims)
 
@@ -262,13 +296,28 @@ export class KitOAuthProvider {
 			throw new InvalidGrantError('Login is too old, connect again')
 		}
 
-		return this.issue(client.client_id, claims.sub, ownClaims(claims), family ?? randomUUID(), authTime ?? now)
+		return this.issue(
+			client.client_id,
+			claims.sub,
+			ownClaims(claims),
+			family ?? randomUUID(),
+			authTime ?? now,
+			binding,
+		)
 	}
 
 	async verifyAccessToken(token: string): Promise<AuthInfo> {
 		const claims = await this.options.tokens.verify('access', token)
 
 		if (!claims) throw new InvalidTokenError('Invalid access token')
+
+		let binding: { aud?: string; scope?: string }
+
+		try {
+			binding = this.grantBinding(claims)
+		} catch {
+			throw new InvalidTokenError('Invalid access token resource or scope')
+		}
 
 		try {
 			this.assertNotRevoked(claims)
@@ -279,7 +328,8 @@ export class KitOAuthProvider {
 		return {
 			token,
 			clientId: String(claims.client_id),
-			scopes: [],
+			scopes: binding.scope?.split(' ').filter(Boolean) ?? [],
+			...(binding.aud ? { resource: new URL(binding.aud) } : {}),
 			expiresAt: claims.exp,
 			extra: { ...ownClaims(claims), subject: claims.sub },
 		}
@@ -293,6 +343,48 @@ export class KitOAuthProvider {
 		if (!claims || claims.client_id !== client.client_id || typeof claims.fam !== 'string') return
 
 		this.options.store.revokeFamily(claims.fam)
+	}
+
+	private binding(resource?: string, scopes: string[] = []): { aud?: string; scope?: string } {
+		if (this.options.scopesSupported === undefined) return {}
+
+		const aud = (this.options.mcpUrl ?? new URL('/mcp', this.options.publicUrl)).href
+
+		if (resource !== undefined && resource !== aud)
+			throw new InvalidTargetError('Resource does not match this server')
+
+		if (scopes.some((scope) => !this.options.scopesSupported!.includes(scope)))
+			throw new InvalidScopeError('Unsupported scope')
+
+		return { aud, scope: [...new Set(scopes)].join(' ') }
+	}
+
+	private grantBinding(claims?: Record<string, unknown>): { aud?: string; scope?: string } {
+		if (this.options.scopesSupported === undefined) return {}
+
+		if (typeof claims?.aud !== 'string' || typeof claims.scope !== 'string')
+			throw new InvalidGrantError('Missing resource or scope binding')
+
+		return this.binding(claims.aud, claims.scope.split(' ').filter(Boolean))
+	}
+
+	private exchangeBinding(claims: Record<string, unknown>, resource?: string, scopes?: string[]) {
+		const granted = this.grantBinding(claims)
+
+		if (this.options.scopesSupported === undefined) return {}
+
+		const requested = this.binding(resource, scopes ?? granted.scope?.split(' ').filter(Boolean))
+		const original = granted.scope!.split(' ').filter(Boolean)
+
+		if (
+			requested
+				.scope!.split(' ')
+				.filter(Boolean)
+				.some((scope) => !original.includes(scope))
+		)
+			throw new InvalidScopeError('Scope exceeds the authorization grant')
+
+		return requested
 	}
 
 	private assertNotRevoked(claims: { sub: string; iat?: unknown }) {
@@ -309,16 +401,18 @@ export class KitOAuthProvider {
 		claims: Record<string, unknown>,
 		family: string,
 		authTime: number,
+		binding: { aud?: string; scope?: string },
 	): Promise<OAuthTokens> {
 		const { tokens, store } = this.options
 		const jti = randomUUID()
-		const payload = { ...claims, sub: subject, client_id: clientId }
+		const payload = { ...claims, ...binding, sub: subject, client_id: clientId }
 
 		store.saveRefresh({ jti, family, subject, expiresAt: Date.now() + tokens.ttl.refresh * 1000 })
 
 		return {
 			access_token: await tokens.sign('access', payload),
 			token_type: 'Bearer',
+			...(binding.scope !== undefined ? { scope: binding.scope } : {}),
 			expires_in: tokens.ttl.access,
 			refresh_token: await tokens.sign('refresh', { ...payload, jti, fam: family, auth_time: authTime }),
 		}

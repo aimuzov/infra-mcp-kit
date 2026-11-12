@@ -118,7 +118,11 @@ await serveHttp({
 - Страницы из `publicDir`, `/x` отдаёт `x.html`. Браузер на неизвестный адрес получает `404.html`, при сбое — страницу `/error`, `fetch` получает JSON.
 - `routes(request, context)` добавляет собственное API сервиса: `Response` или `undefined`, чтобы пропустить запрос дальше. Массив идёт по порядку, отвечает первый `Response`.
 
-`loadHttpConfig()` читает `PUBLIC_URL` (origin, https везде, кроме loopback), `AUTH_SECRET` (от 32 символов, `openssl rand -base64 48`), `PORT` (8080) и `ALLOWED_REDIRECT_URIS`. Колбэки Claude и loopback-адреса разрешены всегда, список добавляется к ним.
+`loadHttpConfig()` читает `PUBLIC_URL` (origin, https везде, кроме loopback), `AUTH_SECRET` (от 32 символов, `openssl rand -base64 48`), `PORT` (8080) и `ALLOWED_REDIRECT_URIS`. Колбэки Claude, ChatGPT и loopback-адреса разрешены всегда, список добавляется к ним.
+
+Чтобы привязать токены к серверу и ограничить права, задай `auth.scopesSupported`, например `['clients:read']`. Запросы авторизации и обмена принимают `resource` (по умолчанию `/mcp` этого сервера) и `scope`. Токены содержат выданные audience и scope, доступные как `auth.resource` (`URL`) и `auth.scopes`.
+
+Чужой ресурс и неподдерживаемые права отклоняются; refresh может сузить права, но не расширить. Без `scope` при авторизации права пусты. Без `scopesSupported` сохраняется прежнее поведение токенов.
 
 Правила OAuth:
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.0](https://github.com/aimuzov/infra-mcp-kit/compare/v3.4.1...v3.5.0) (2026-11-12)
+
+
+### Features
+
+* support resource-bound OAuth scopes for ChatGPT ([16cb744](https://github.com/aimuzov/infra-mcp-kit/commit/16cb744cf4b3f0a40e44773d51110d4853b6a08f))
+
 ## [3.4.1](https://github.com/aimuzov/infra-mcp-kit/compare/v3.4.0...v3.4.1) (2026-10-28)
 
 

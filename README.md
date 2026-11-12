@@ -118,7 +118,11 @@ await serveHttp({
 - The pages from `publicDir`, `/x` serves `x.html`. A browser gets `404.html` for an unknown route and the `/error` page for a failure, `fetch` gets JSON.
 - `routes(request, context)` adds the service's own API: a `Response`, or `undefined` to pass the request on. An array runs in order, the first `Response` wins.
 
-`loadHttpConfig()` reads `PUBLIC_URL` (an origin, https outside loopback), `AUTH_SECRET` (at least 32 characters, `openssl rand -base64 48`), `PORT` (8080) and `ALLOWED_REDIRECT_URIS`. Claude's callbacks and loopback addresses are always allowed, the list adds to them.
+`loadHttpConfig()` reads `PUBLIC_URL` (an origin, https outside loopback), `AUTH_SECRET` (at least 32 characters, `openssl rand -base64 48`), `PORT` (8080) and `ALLOWED_REDIRECT_URIS`. Claude and ChatGPT callbacks and loopback addresses are always allowed, the list adds to them.
+
+To bind tokens to this server and limit permissions, set `auth.scopesSupported`, for example `['clients:read']`. Authorization and token requests accept `resource` (defaults to this server's `/mcp`) and `scope`. Tokens carry the granted audience and scope, exposed as `auth.resource` (a `URL`) and `auth.scopes`.
+
+Unknown resources and scopes are rejected; refresh can narrow permissions but cannot expand them. Omitting `scope` during authorization grants no permissions. Omitting `scopesSupported` keeps legacy token behavior.
 
 OAuth rules:
 

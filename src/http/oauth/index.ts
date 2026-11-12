@@ -4,6 +4,8 @@ export {
 	InvalidGrantError,
 	InvalidRequestError,
 	InvalidTokenError,
+	InvalidScopeError,
+	InvalidTargetError,
 	OAuthError,
 	TooManyRequestsError,
 	UnsupportedGrantTypeError,

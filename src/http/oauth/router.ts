@@ -58,6 +58,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 
 	const authorizationServer = {
 		issuer,
+		...(options.scopesSupported !== undefined ? { scopes_supported: options.scopesSupported } : {}),
 		authorization_endpoint: endpoint('/authorize'),
 		token_endpoint: endpoint('/token'),
 		registration_endpoint: endpoint('/register'),
@@ -70,6 +71,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 	}
 	const protectedResource = {
 		resource: mcpUrl.href,
+		...(options.scopesSupported !== undefined ? { scopes_supported: options.scopesSupported } : {}),
 		authorization_servers: [issuer],
 		resource_name: resourceName,
 	}
@@ -163,14 +165,21 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 		if (params.code_challenge_method !== 'S256')
 			return back('invalid_request', 'code_challenge_method must be S256')
 
-		const location = await provider.authorize(client, {
-			redirectUri,
-			codeChallenge: params.code_challenge,
-			state: params.state,
-			scopes: params.scope ? params.scope.split(' ') : [],
-		})
+		try {
+			const location = await provider.authorize(client, {
+				redirectUri,
+				codeChallenge: params.code_challenge,
+				state: params.state,
+				scopes: params.scope?.split(' ').filter(Boolean),
+				resource: params.resource,
+			})
 
-		return redirect(location)
+			return redirect(location)
+		} catch (error) {
+			if (error instanceof OAuthError) return back(error.code, error.message)
+
+			throw error
+		}
 	}
 
 	/** Клиент по `client_id` из формы или Basic, с проверкой секрета, если он у клиента есть. */
@@ -220,14 +229,28 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 				throw new InvalidGrantError('code_verifier does not match the challenge')
 
 			return json(
-				await provider.exchangeAuthorizationCode(client, form.code, form.code_verifier, form.redirect_uri),
+				await provider.exchangeAuthorizationCode(
+					client,
+					form.code,
+					form.code_verifier,
+					form.redirect_uri,
+					form.resource,
+					form.scope === undefined ? undefined : form.scope.split(' ').filter(Boolean),
+				),
 			)
 		}
 
 		if (form.grant_type === 'refresh_token') {
 			if (!form.refresh_token) throw new InvalidRequestError('refresh_token is required')
 
-			return json(await provider.exchangeRefreshToken(client, form.refresh_token))
+			return json(
+				await provider.exchangeRefreshToken(
+					client,
+					form.refresh_token,
+					form.resource,
+					form.scope === undefined ? undefined : form.scope.split(' ').filter(Boolean),
+				),
+			)
 		}
 
 		throw new UnsupportedGrantTypeError(`Unsupported grant_type: ${form.grant_type ?? ''}`)
@@ -282,6 +305,7 @@ export function oauthRouter(options: OAuthOptions): OAuthRouter {
 				String(claims.code_challenge),
 				String(claims.state ?? ''),
 				grant,
+				claims,
 			)
 
 			return redirect(target.href)

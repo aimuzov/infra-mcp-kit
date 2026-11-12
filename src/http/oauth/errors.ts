@@ -18,6 +18,7 @@ export type OAuthTokens = {
 	token_type: 'Bearer'
 	expires_in: number
 	refresh_token: string
+	scope?: string
 }
 
 /**
@@ -79,5 +80,17 @@ export class UnsupportedGrantTypeError extends OAuthError {
 export class TooManyRequestsError extends OAuthError {
 	constructor(message: string) {
 		super('too_many_requests', message, 429)
+	}
+}
+
+export class InvalidTargetError extends OAuthError {
+	constructor(message: string) {
+		super('invalid_target', message)
+	}
+}
+
+export class InvalidScopeError extends OAuthError {
+	constructor(message: string) {
+		super('invalid_scope', message)
 	}
 }

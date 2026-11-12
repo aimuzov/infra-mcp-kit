@@ -36,6 +36,8 @@ export type Service = {
 
 export type HttpAuthOptions = {
 	login: Login
+	/** Включает привязку токенов к /mcp и проверку запрошенных прав. */
+	scopesSupported?: string[]
 	store: AuthStore
 	/**
 	 * `encrypt`, когда в claims едет чужой секрет. По умолчанию `sign`.
@@ -147,6 +149,7 @@ export function createHttpApp(options: HttpAppOptions): HttpApp {
 			tokens,
 			store: auth.store,
 			login: auth.login,
+			scopesSupported: auth.scopesSupported,
 			allowedRedirectUris: config.allowedRedirectUris,
 			logger,
 		})

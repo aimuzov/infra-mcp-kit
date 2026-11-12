@@ -9,13 +9,22 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  id-token: write
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Reuse verified CI
+        id: verified
+        uses: aimuzov/infra-ci/reuse-check@v1
+        continue-on-error: true
+        with:
+          workflow: .github/workflows/check.yml
       - uses: actions/checkout@v5
+        if: steps.verified.outputs.reused != 'true'
       # Свой же action из этой ветки: так PR проверяет и изменения в нём.
       # У кита нет бинаря, вместо запуска сервера смотрим, что установленный тарбол
       # импортируется. `--conditions=development` -- как у сервера, который гоняет
@@ -28,14 +37,24 @@ jobs:
           # это видно только в консоли браузера.
           ui: true
           # Без `/testing`: ему нужен клиент SDK, а он есть только в devDependencies сервера.
-          installed-smoke: node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http', '@aimuzov/infra-mcp-kit/astro'].map((m) => import(m)))"
+          installed-smoke:
+            node --conditions=development -e "Promise.all(['@aimuzov/infra-mcp-kit', '@aimuzov/infra-mcp-kit/http',
+            '@aimuzov/infra-mcp-kit/astro'].map((m) => import(m)))"
+        if: steps.verified.outputs.reused != 'true'
       # Страницы и острова кита живут в `astro/` исходниками, их собирает сервер. Типы
       # проверяем здесь: svelte-check по островам и astro check по коннектору-фикстуре.
       - run: npm run check:pages
+        if: steps.verified.outputs.reused != 'true'
       # Снимки экранов не сравниваем: шрифты на раннере другие, они уходят артефактом.
-      - if: always()
+      - if: steps.verified.outputs.reused != 'true' && (always())
         uses: actions/upload-artifact@v4
         with:
           name: screens
           path: test-results/screens
           if-no-files-found: ignore
+      - name: Record verified CI
+        if: github.event_name == 'pull_request' && steps.verified.outputs.reused != 'true'
+        uses: aimuzov/infra-ci/record-check@v1
+        continue-on-error: true
+        with:
+          workflow: .github/workflows/check.yml

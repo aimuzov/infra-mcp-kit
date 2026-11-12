@@ -18,6 +18,8 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
+  id-token: write
 
 jobs:
   release:
@@ -38,8 +40,8 @@ jobs:
   major-tag:
     needs: [release, check, publish]
     if: >-
-      !cancelled() && needs.check.result == 'success' &&
-      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+      !cancelled() && needs.check.result == 'success' && (needs.publish.result == 'success' || needs.publish.result ==
+      'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -63,8 +65,8 @@ jobs:
     # `!cancelled()`, а не `always()`: job идёт и при пропущенных release и check
     # (ручной запуск), но отменённый прогон не публикует.
     if: >-
-      !cancelled() && vars.NPM_PUBLISH == 'true' &&
-      (github.event_name == 'workflow_dispatch' || needs.check.result == 'success')
+      !cancelled() && vars.NPM_PUBLISH == 'true' && (github.event_name == 'workflow_dispatch' || needs.check.result ==
+      'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
